@@ -165,13 +165,6 @@ workbookPath = fullfile('data', 'input_data.xlsx');
 
 ---
 
-## References
-- S. P. Timoshenko, *Strength of Materials*, Part 1.
-- J. Gere & S. Timoshenko, *Mechanics of Materials*.
-- A. Ghali, A. Neville, T. G. Brown, *Structural Analysis: A Unified Classical and Matrix Approach*.
-
----
-
 ## Contributing
 Feel free to fork the project, extend section libraries, or add verification examples. When sharing improvements, include a brief description of the load case or theoretical reference used for validation.
 
