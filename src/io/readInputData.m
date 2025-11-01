@@ -65,16 +65,22 @@ function [nodes, elements, supports, forces, E, A, density, sectionType, width, 
         end
         forces.Properties.VariableNames = standardizedForceNames;
 
-        requiredForceColumns = {'NodeID', 'Fx', 'Fy'};
+        requiredForceColumns = {'NodeID', 'Fx', 'Fy', 'Mz'};
         if ~all(ismember(requiredForceColumns, forces.Properties.VariableNames))
-            error('Forces sheet must contain NodeID, Fx, and Fy columns.');
+            error('Forces sheet must contain NodeID, Fx, Fy, and Mz columns.');
         end
 
-        if ~ismember('Mz', forces.Properties.VariableNames)
-            forces.Mz = zeros(size(forces, 1), 1);  % Default to zero nodal moment when unspecified.
-        end
+        forces = forces(:, requiredForceColumns);
 
-        forces = forces(:, {'NodeID', 'Fx', 'Fy', 'Mz'});
+        for idx = 1:numel(requiredForceColumns)
+            colName = requiredForceColumns{idx};
+            if ~isnumeric(forces.(colName))
+                error('Forces sheet column %s must be numeric.', colName);
+            end
+            if any(~isfinite(forces.(colName)))
+                error('Forces sheet column %s contains missing or invalid values.', colName);
+            end
+        end
         
         % CHECK FOR ADVANCED MATERIAL PROPERTIES
         expected_props = {'YoungsModulus', 'CrossSectionalArea', 'Density', 'SectionType', 'Width', 'Height', 'Diameter', 'ShearModulus', 'PoissonRatio'};

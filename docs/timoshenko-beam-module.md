@@ -77,7 +77,7 @@ end
 - `nodes` (`n×3` numeric array): `[NodeID, X, Y]`.
 - `elements` (`e×3` numeric array): `[ElementID, Node1, Node2]`.
 - `supports` (struct): Fields `NodeID` (vector), `Type` (string array).
-- `forces` (`f×4` numeric array): `[NodeID, Fx, Fy, Mz]` with zero-filled `Mz` if absent.
+- `forces` (`f×4` numeric array): `[NodeID, Fx, Fy, Mz]` with explicit nodal moments.
 - `E`, `A`, `density`, `sectionType`, `width`, `height`, `diameter`, `G`, `nu`: Material and geometric scalars.
 
 **Pseudocode**
@@ -89,7 +89,7 @@ function readInputData(inputWorkbook)
     try
         read tables from Nodes, Elements, Supports, Forces, Properties sheets
         standardize column names (NodeID, Fx, etc.)
-        ensure required force columns exist; add zero Mz if missing
+    ensure required force columns exist; error if Mz column missing
         extract basic material properties (E, A, density)
         initialize default section geometry (rectangle assumptions)
         override defaults with Properties sheet values when present
@@ -224,7 +224,8 @@ function [displacements, stresses] = performTimoshenkoFEA(nodes, elements, suppo
     end
 
     for each applied nodal force
-        map Fx, Fy, and optional Mz into F based on node row
+    map Fx, Fy, and Mz into F based on node row
+    add self-weight distributed load as consistent nodal forces and moments
     end
 
     for each element

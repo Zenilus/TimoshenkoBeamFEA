@@ -141,27 +141,67 @@ function [displacements, stresses] = performTimoshenkoFEA(nodes, elements, suppo
         end
     end
     
-    % ADD SELF-WEIGHT FORCES
-    % The beam's own weight acts as a distributed load along its length
-    % We convert this to equivalent nodal forces
+    % ADD SELF-WEIGHT FORCES AND CONSISTENT MOMENTS
+    % The beam's own weight is treated as a uniform distributed load that
+    % induces both shear forces and end moments in each element.
+    grav = 9.81;  % Acceleration due to gravity (m/s^2)
+    tol = 1e-12;  % Numerical tolerance to avoid adding tiny values
     for i = 1:num_elements
         % Get the nodes for this element
         node1_id = elements(i,2);
         node2_id = elements(i,3);
         node1_row = find(nodes(:,1) == node1_id, 1);
         node2_row = find(nodes(:,1) == node2_id, 1);
-        
-        % Calculate element length and weight
+
+        % Calculate element geometry and orientation
         x1 = nodes(node1_row,2); y1 = nodes(node1_row,3);
         x2 = nodes(node2_row,2); y2 = nodes(node2_row,3);
         L = sqrt((x2-x1)^2 + (y2-y1)^2);
-        
-        % Total weight of this element (mass × gravity)
-        weight = density * A * L * 9.81;  % N (Newtons)
-        
-        % Split the weight equally between the two end nodes
-        F(3*node1_row-1) = F(3*node1_row-1) - weight/2;  % Downward force at node 1
-        F(3*node2_row-1) = F(3*node2_row-1) - weight/2;  % Downward force at node 2
+        c = (x2-x1)/L;
+        s = (y2-y1)/L;
+
+        % Transformation matrix for this element (local -> global)
+        T = [c s 0 0 0 0;
+             -s c 0 0 0 0;
+             0 0 1 0 0 0;
+             0 0 0 c s 0;
+             0 0 0 -s c 0;
+             0 0 0 0 0 1];
+
+        % Uniform load per unit length in global coordinates
+        w_global = [0; -density * A * grav];  % [wx; wy]
+
+        % Express distributed load in element local axes
+        qx_local = c * w_global(1) + s * w_global(2);
+        qy_local = -s * w_global(1) + c * w_global(2);
+
+        % Build consistent nodal load vector in local coordinates
+        f_local = zeros(6,1);
+
+        if abs(qx_local) > tol
+            axial_eq = qx_local * L / 2;
+            f_local(1) = f_local(1) + axial_eq;
+            f_local(4) = f_local(4) + axial_eq;
+        end
+
+        if abs(qy_local) > tol
+            shear_eq = qy_local * L / 2;
+            moment_eq = qy_local * L^2 / 12;
+            f_local(2) = f_local(2) + shear_eq;
+            f_local(5) = f_local(5) + shear_eq;
+            f_local(3) = f_local(3) + moment_eq;
+            f_local(6) = f_local(6) - moment_eq;
+        end
+
+        % Convert local nodal loads back to global coordinates
+        f_global = T' * f_local;
+
+        % Scatter into the global force vector
+        dof = [
+            3*node1_row-2; 3*node1_row-1; 3*node1_row;
+            3*node2_row-2; 3*node2_row-1; 3*node2_row
+        ];
+        F(dof) = F(dof) + f_global;
     end
     
     % APPLY BOUNDARY CONDITIONS (SUPPORTS)

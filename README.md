@@ -88,6 +88,7 @@ Create an `input_data.xlsx` file under `data/`. Each sheet feeds a different par
 | 3 | 1000 | 0 | 150 |
 
 - Forces are applied at nodes in Newtons and follow the right-handed sign convention: positive `Fx` acts along +X (right), positive `Fy` acts along +Y (up), and positive `Mz` induces a counter-clockwise rotation about +Z (out of plane).
+- Forces are applied at nodes in Newtons and follow the right-handed sign convention: positive `Fx` acts along +X (right), positive `Fy` acts along +Y (up), and positive `Mz` induces a counter-clockwise rotation about +Z (out of plane). Include the `Mz` column even when the nodal moment is zero so the solver can assemble the global load vector consistently.
 
 ### 5. `Properties`
 At minimum include:
