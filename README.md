@@ -1,187 +1,206 @@
-# MATLAB Timoshenko Beam FEA Toolkit
+## MATLAB Timoshenko Beam FEA Toolkit
 
-This repository contains a modular MATLAB implementation of a two-dimensional Timoshenko beam finite element analysis (FEA) workflow. The toolkit reads a beam definition from an Excel workbook, assembles the global stiffness system, solves for nodal displacements, evaluates internal forces and stresses, and visualizes both the original and deformed beam configurations. The emphasis is on clarity and extensibility so the code can support coursework, research prototypes, or quick structural what-if studies.
+This toolkit implements a two-dimensional Timoshenko beam finite element workflow in MATLAB. A single driver script reads structural data from an Excel workbook, assembles and solves the global system, computes section-level response metrics, and renders publication-ready visualizations. The code favors clarity and modularity so that you can adapt it to coursework, research prototypes, or rapid what-if studies without reverse engineering a monolithic script.
 
-## Highlights
-- End-to-end MATLAB pipeline from Excel input to publication-ready plots
-- Modular source tree that invites experimentation with material laws or elements
-- Built-in utilities for post-processing, visualization, and result inspection
-- Automatic self-weight loading using consistent nodal forces and end moments
-- Automated extreme-value stress reporting with element, plane, and end metadata
-- Verification guidance to compare with analytical Timoshenko beam solutions
-
-## Table of Contents
-- [Why Timoshenko Theory?](#why-timoshenko-theory)
-- [Repository Layout](#repository-layout)
-- [Prerequisites](#prerequisites)
-- [Preparing the Input Workbook](#preparing-the-input-workbook)
+## Contents
+- [Why Timoshenko?](#why-timoshenko)
+- [Feature Highlights](#feature-highlights)
+- [Repository Structure](#repository-structure)
+- [Software Requirements](#software-requirements)
 - [Quick Start](#quick-start)
+- [Input Workbook Specification](#input-workbook-specification)
+- [Running Analyses](#running-analyses)
 - [Understanding the Outputs](#understanding-the-outputs)
-- [Extending or Customizing](#extending-or-customizing)
-- [Testing and Verification](#testing-and-verification)
+- [Customising the Workflow](#customising-the-workflow)
+- [Verification Guidance](#verification-guidance)
 - [Troubleshooting](#troubleshooting)
-- [References](#references)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## Why Timoshenko Theory?
-Classical Euler-Bernoulli beam theory ignores shear deformation, which can lead to large errors for thick beams, composite members, or low shear-stiffness materials. Timoshenko theory remedies this by coupling bending and shear effects. The provided MATLAB scripts implement this richer model while keeping the analysis pipeline approachable.
+## Why Timoshenko?
+Classical Euler-Bernoulli theory neglects shear deformation, which becomes inaccurate for thick beams, short spans, laminated sections, or materials with low shear stiffness. Timoshenko beam theory augments the formulation with shear flexibility so bending and shear deformations are solved concurrently. The additional fidelity is critical when:
+- span-to-depth ratios drop below roughly 10
+- laminated timber, composite, or sandwich panels are analysed
+- high shear loads drive serviceability checks
+- accurate rotations are needed for connection design
+
+This repository packages that theory into a MATLAB code base with a clear control flow, keeping advanced behaviour accessible to students and practitioners.
 
 ---
 
-## Repository Layout
-- `scripts/` – Entry points runnable from MATLAB. The default driver is `scripts/TimoshenkoBeamFEA.m` which adds the `src` tree to the path and kicks off a full analysis.
-- `src/` – Reusable library code split by concern:
-  - `analysis/` – Core finite element routines (`performTimoshenkoFEA.m`, `calculateTimoshenkoStiffness.m`, `calculateTimoshenkoStresses.m`).
-  - `io/` – Data loading helpers (`readInputData.m`).
-  - `properties/` – Cross-section property calculations (`calculateTimoshenkoSectionProperties.m`).
-  - `reporting/` – Console summaries (`displayResults.m`).
-  - `visualization/` – Plotting utilities (`plotBeamSystem.m`, `plotDeformedShape.m`, `getColorFromValue.m`).
-- `data/` – Place analysis workbooks such as `input_data.xlsx`.
-- `docs/` – Project documentation, figures, and references.
+## Feature Highlights
+- End-to-end pipeline from Excel input to figures and console summaries.
+- Modular source tree with specific directories for I/O, analysis, reporting, and plotting.
+- Automatic application of self-weight via consistent nodal loads and end moments.
+- Stress post-processing that tracks controlling element, plane, and end metadata for every extreme value.
+- Visualization of both undeformed geometry and scaled deformed shapes with displacement magnitude gradients.
+- Well-documented functions that support incremental extension (new elements, shapes, or reporting formats).
 
 ---
 
-## Prerequisites
-- MATLAB R2020a or newer (earlier versions may work but have not been verified).
-- No special toolboxes are required beyond base MATLAB.
-- Microsoft Excel or any editor capable of creating `.xlsx` files in the expected layout.
-- Optional: familiarity with basic structural analysis terminology.
+## Repository Structure
+| Path | Description |
+| ---- | ----------- |
+| `scripts/TimoshenkoBeamFEA.m` | Entry point that sets up the MATLAB path, reads input data, runs the solver, and orchestrates reporting/plots. |
+| `src/analysis/` | Core finite element routines for stiffness assembly, solving, and stress recovery. |
+| `src/io/` | Excel parsing utilities that normalise sheet layouts and property definitions. |
+| `src/properties/` | Section property calculators tailored to Timoshenko theory (e.g., shear correction factors). |
+| `src/reporting/` | Displacement summaries, extrema extraction helpers, and text formatting for console output. |
+| `src/visualization/` | Plotters for the undeformed system, deformed shapes, and colour mapping helpers. |
+| `data/` | Drop input workbooks such as `input_data.xlsx`; not tracked by default. |
+| `docs/` | Detailed module documentation and implementation notes. |
 
 ---
 
-## Preparing the Input Workbook
-Create an `input_data.xlsx` file under `data/`. Each sheet feeds a different part of the solver; column order matters. Units are assumed to be SI (meters, Newtons, Pascals, kg/m³).
-
-### 1. `Nodes`
-| NodeID | X | Y |
-|--------|---|---|
-| 1 | 0.0 | 0.0 |
-| 2 | 2.0 | 0.0 |
-| ⋮ | ⋮ | ⋮ |
-
-- `NodeID` must be unique integers.
-- Coordinates are given in meters.
-
-### 2. `Elements`
-| ElementID | Node1 | Node2 |
-|-----------|-------|-------|
-| 1 | 1 | 2 |
-| 2 | 2 | 3 |
-
-- Elements are straight-line members connecting two existing nodes.
-- Orientation is inferred from node coordinates.
-
-### 3. `Supports`
-| NodeID | Type |
-|--------|------|
-| 1 | Fixed |
-| 3 | Roller |
-
-- `Type` accepts `Fixed`, `Pinned`, or `Roller` (case-insensitive).
-- Multiple supports can be assigned across the model.
-
-### 4. `Forces`
-| NodeID | Fx | Fy | Mz |
-|--------|----|----|----|
-| 2 | 0 | -5000 | 0 |
-| 3 | 1000 | 0 | 150 |
-
-- Forces are applied at nodes in Newtons and follow the right-handed sign convention: positive `Fx` acts along +X (right), positive `Fy` acts along +Y (up), and positive `Mz` induces a counter-clockwise rotation about +Z (out of plane).
-- Include the `Mz` column even when the nodal moment is zero so the solver can assemble the global load vector consistently.
-- Self-weight loads are derived from `density` and applied automatically; set `density` to zero to suppress gravity loads when necessary.
-
-### 5. `Properties`
-At minimum include:
-
-| YoungsModulus | CrossSectionalArea | Density |
-|---------------|--------------------|---------|
-| 2.1e11 | 8.0e-3 | 7850 |
-
-Optional columns (recommended for high accuracy):
-
-| SectionType | Width | Height | Diameter | ShearModulus | PoissonRatio |
-|-------------|-------|--------|----------|--------------|--------------|
-| Rectangle | 0.1 | 0.2 | | 8.1e10 | 0.3 |
-
-- `SectionType` supports `Rectangle`, `Square`, or `Circle`.
-- Provide either `ShearModulus` directly or `PoissonRatio` so `G` can be derived.
-- Leaving geometric columns blank triggers conservative defaults based on area.
-
-> **Tip:** Keep IDs consecutive and start all tables on row 2, with headers on row 1.
+## Software Requirements
+- MATLAB R2020a or newer (base MATLAB only). Earlier versions may work but are untested.
+- Microsoft Excel (or any editor capable of producing `.xlsx` files) for preparing inputs.
+- Optional: familiarity with finite element terminology to interpret outputs and customise loads.
 
 ---
 
 ## Quick Start
-1. Open MATLAB and change the working directory to the repository folder.
-2. Review `data/input_data.xlsx` (or duplicate your preferred template workbook) and confirm IDs, units, and load directions.
-3. Launch the driver script:
+1. Clone or download this repository and open MATLAB in the project root.
+2. Copy the sample workbook template found in `data/README.md` or build your own using the [Input Workbook Specification](#input-workbook-specification).
+3. From the MATLAB command window run:
+   ```matlab
+   TimoshenkoBeamFEA
+   ```
+   Provide an absolute or relative workbook path to analyse other files:
+   ```matlab
+   TimoshenkoBeamFEA('data/my_load_case.xlsx')
+   ```
+4. Review the console summary for displacements and stress extrema, then inspect the generated figures for geometry and deformed shape validation.
+
+---
+
+## Input Workbook Specification
+The solver expects a single Excel workbook with named sheets. Column order matters, headers must be present on the first row, and values below row 2 define the model. Adopt SI units (metres, Newtons, Pascals, kg/m³) for consistency.
+
+### Nodes
+| NodeID | X | Y |
+| ------ | - | - |
+| 1 | 0.0 | 0.0 |
+| 2 | 2.0 | 0.0 |
+
+- `NodeID` must be unique, positive integers.
+- Coordinates are 2D Cartesian positions in metres.
+
+### Elements
+| ElementID | Node1 | Node2 |
+| --------- | ----- | ----- |
+| 1 | 1 | 2 |
+| 2 | 2 | 3 |
+
+- Each row connects two existing nodes. Orientation is derived from nodal coordinates.
+- Elements are straight Timoshenko beams with 3 degrees of freedom per node (`ux`, `uy`, `theta`).
+
+### Supports
+| NodeID | Type |
+| ------ | ---- |
+| 1 | Fixed |
+| 3 | Roller |
+
+- Supported types: `Fixed`, `Pinned`, `Roller` (case-insensitive).
+- Combine types with repeated rows if a node carries different constraints (e.g., `Pinned` plus `Roller` is equivalent to `Fixed`).
+
+### Forces
+| NodeID | Fx | Fy | Mz |
+| ------ | -- | -- | -- |
+| 2 | 0 | -5000 | 0 |
+| 3 | 1000 | 0 | 150 |
+
+- Forces are nodal loads in Newtons; `Mz` is an out-of-plane nodal moment in Newton-metres.
+- Positive axes use the right-hand convention: +X to the right, +Y upward, +Z out of the page (counter-clockwise positive moment).
+- The column `Mz` must exist even when zero to maintain consistent load vector assembly.
+
+### Properties
+At minimum supply:
+
+| YoungsModulus | CrossSectionalArea | Density |
+| ------------- | ------------------ | ------- |
+| 2.1e11 | 8.0e-3 | 7850 |
+
+
+| SectionType | Width | Height | Diameter | ShearModulus | PoissonRatio |
+| ----------- | ----- | ------ | -------- | ------------ | ------------ |
+| Rectangle | 0.1 | 0.2 | | 8.1e10 | 0.3 |
+
+- Supported section types: `Rectangle`, `Square`, `Circle`. Unknown types fall back to conservative rectangular assumptions.
+
+
+
+> **Tips**
+> - Keep IDs consecutive to simplify debugging.
+> - Start each sheet at row 1 with headers; MATLAB treats empty header cells as unnamed variables and the importer will reject them.
+> - Set `Density` to zero if you want to omit self-weight from the load case.
+
+---
+
+## Running Analyses
+- Execute `TimoshenkoBeamFEA` from MATLAB. The script automatically adds `src/` to the path, reads the workbook, and orchestrates the workflow.
+- To reuse the solver in other scripts, call `performTimoshenkoFEA` directly:
   ```matlab
-  TimoshenkoBeamFEA
+  workbookPath = fullfile('data', 'input_data.xlsx');
+  [nodes, elements, supports, forces, E, A, rho, sectionType, w, h, d, G, nu] = readInputData(workbookPath);
+  [displacements, stresses] = performTimoshenkoFEA(nodes, elements, supports, forces, E, A, rho, sectionType, w, h, d, G, nu);
   ```
-  Use `TimoshenkoBeamFEA('relative/or/absolute/path.xlsx')` to analyze a different workbook without relocating it.
-4. Inspect the MATLAB command window and generated figures to validate the model setup before moving to detailed studies.
+- The solver returns displacement and stress structures that you can feed into custom plotting, optimisation loops, or export functions.
 
 ---
 
 ## Understanding the Outputs
-- **Console log**
-  - Beam summary (counts, material constants, derived section properties).
-  - Max horizontal/vertical displacements and rotations with contextual notes.
-  - Extreme-value stress lines (bending moments, bending stresses, shear forces, shear stresses, von Mises) with the controlling element, section plane, and end.
-  - Peak combined stress, bending moment, shear force, and shear stress per element.
-- **Plots**
-  - Undeformed layout for quick verification of geometry, support types, and load directions.
-  - Deformed shape using an automatic scale factor; legend indicates the magnification.
-  - Colorbar reports actual displacement magnitudes (meters).
-- **Programmatic access**
-  - `stresses.elemental`, `stresses.bending_moments`, `stresses.shear_forces`, and `stresses.von_mises` provide ready-to-plot envelopes.
-  - Detailed structs (`stresses.bending_details`, `stresses.shear_details`, `stresses.von_mises_details`) capture the plane/end metadata driving the console report.
-  - The helper `prepareStressReportEntries` turns these details into consistent text output if you want to reformat or export the results.
+**Console summary**
+- Global counts, material constants, and derived section properties.
+- Maximum horizontal and vertical displacements plus extreme rotations with qualitative flags (small/moderate/large).
+- Peak bending moments, bending stresses, shear forces, shear stresses, and von Mises stresses with controlling element, plane, and end labels.
 
-If you need numerical displacements or stresses for post-processing, capture the outputs directly by calling the lower-level API:
-```matlab
-workbookPath = fullfile('data', 'input_data.xlsx');
-[nodes, elements, supports, forces, E, A, rho, sectionType, w, h, d, G, nu] = readInputData(workbookPath);
-[displacements, stresses] = performTimoshenkoFEA(nodes, elements, supports, forces, E, A, rho, sectionType, w, h, d, G, nu);
-```
+**Figures**
+- `plotBeamSystem`: undeformed geometry, support types, and applied forces/moments for model validation.
+- `plotDeformedShape`: overlaid deformed configuration with automatic scaling, displacement magnitude colour bar, and annotations for maximum displacement.
 
-Key fields inside `stresses` mirror the console summary and expose deeper metadata for custom reporting or plotting.
+**Programmatic data**
+- `displacements`: global DOF vector ordered `[u1, v1, theta1, u2, ...]`.
+- `stresses.elemental`: von-Mises-style element envelope combining axial, bending, and shear contributions.
+- `stresses.bending_details`, `stresses.shear_details`, `stresses.von_mises_details`: metadata structs with indices and signed values for each plane/end combination, suitable for automated reporting.
+
+Store the returned struct for post-processing pipelines such as fatigue checks, design code verifications, or report generation.
 
 ---
 
-## Extending or Customizing
-- **Different load cases**: Duplicate and modify `data/input_data.xlsx`, then rerun the driver.
-- **Alternate visualization**: Use `displacements` and `stresses` from `performTimoshenkoFEA` to script custom plots or animations.
-- **Element refinement**: Add more nodes/elements to capture curvature or localized loads with greater fidelity.
-- **Cross-section library**: Extend `calculateTimoshenkoSectionProperties.m` with additional shapes (e.g., I-beams, hollow rectangles) and return the appropriate shear correction factors.
-- **Non-uniform properties**: The current implementation assumes constant material/section properties. To vary them per element, pass vectors of `E`, `A`, etc., and adapt the loops accordingly.
-- **Reporting format**: Customize `prepareStressReportEntries` or the `compute*ExtremaSummary` helpers to feed dashboards, Excel exports, or automated validators.
+## Customising the Workflow
+- **Alternative load cases**: Duplicate the workbook, adjust node forces or densities, and rerun the driver without altering MATLAB files.
+- **Element refinement**: Add intermediate nodes to capture curvature and local effects. The solver automatically adapts to the new topology.
+- **Section library extensions**: Enhance `calculateTimoshenkoSectionProperties.m` with profiles such as I-beams or hollow rectangles and supply appropriate shear correction factors.
+- **Spatially varying properties**: Modify `readInputData` and `performTimoshenkoFEA` to accept per-element vectors for `E`, `A`, or density when modelling tapered or composite members.
+- **Reporting/export**: Extend the helpers in `src/reporting/` to write CSV/Excel summaries or integrate with dashboards.
+- **Visual styling**: Adjust `plotBeamSystem` or `plotDeformedShape` to match publication branding or to add annotations.
 
 ---
 
-## Testing and Verification
-- Start with a canonical cantilever or simply supported beam problem that has a published Timoshenko solution.
-- Compare tip deflections, rotations, and bending moments against textbook results before exploring complex geometries.
-- For peer review or coursework submissions, capture load cases, numerical results, and plots in `docs/` for traceability.
+## Verification Guidance
+- Validate the code with canonical problems: cantilever under tip load, simply supported beam under uniform load, and deep beam scenarios where shear deformation is significant.
+- Compare deflections, rotations, shear forces, and bending moments against textbook Timoshenko solutions or high-fidelity FEA packages.
+- Document load cases, solver outputs, and plots in `docs/` to maintain a traceable verification record.
+- If you extend the section library or solver, add regression tests (e.g., MATLAB scripts comparing analytical values) to ensure future changes remain trustworthy.
 
 ---
 
 ## Troubleshooting
-- **"Error reading input file"** – Ensure `data/input_data.xlsx` exists and sheet headers match the documented format.
-- **Ill-conditioned stiffness warning** – Typically indicates missing supports or an unconstrained degree of freedom. Double-check boundary conditions.
-- **Zero or tiny displacements** – Units may be inconsistent (e.g., millimeters instead of meters) or the load magnitudes are too small relative to stiffness.
-- **Plots missing forces/supports** – Verify the IDs in `Supports` and `Forces` correspond to valid node IDs.
-- **Section modulus warning** – The solver now checks geometric consistency and warns if the computed section modulus deviates by more than 20% from the expected value for rectangles, squares, or circles; revalidate the workbook dimensions and units if this appears.
+- **Workbook import error**: Confirm the file path, sheet names, and headers match the specification. Empty header cells cause the importer to fail.
+- **Ill-conditioned stiffness warning**: Indicates missing supports or duplicated DOFs. Review boundary conditions and ensure each rigid body motion is restrained.
+- **Unexpectedly small displacements**: Check unit consistency (metres vs millimetres) and verify load magnitudes.
+- **Missing forces in plots**: Ensure every force references an existing node ID and that `Mz` is present even when zero.
+- **Section modulus warning**: Occurs when supplied geometric dimensions do not match the implied area within ±20%. Revisit `Width`, `Height`, or `Diameter` entries.
 
 ---
 
 ## Contributing
-Feel free to fork the project, extend section libraries, or add verification examples. When sharing improvements, include a brief description of the load case or theoretical reference used for validation.
+Contributions are welcome. Please open an issue describing the proposed enhancement or bug fix, link relevant references or validation cases, and submit a pull request with clear commit messages. Include verification evidence (plots, numerical comparisons) for solver-level changes.
 
 ---
 
 ## License
-This project is distributed for educational and research purposes. Adapt as needed for your academic or professional projects.
+Distributed for educational and research use. Adapt and extend it for academic projects or professional prototypes at your discretion.

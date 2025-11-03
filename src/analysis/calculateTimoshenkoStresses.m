@@ -278,7 +278,7 @@ function [elemental_stresses, bending_moments, shear_forces, shear_stresses, ele
 end
 
 function envelope = computePlaneEndEnvelope(values)
-%COMPUTEPLANEENDENVELOPE Return the maximum absolute entry across planes and ends.
+%COMPUTE PLANE END ENVELOPE Return the maximum absolute entry across planes and ends.
 %   This helper is used to report extreme responses by considering both
 %   section planes (e.g., top/bottom fibers) and the A/B ends of an element.
 %   It provides a single scalar suitable for max-value reporting.

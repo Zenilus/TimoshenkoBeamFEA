@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Timoshenko Beam FEA Module Documentation</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <h1 id="timoshenko-beam-fea-module-documentation">Timoshenko Beam FEA Module Documentation</h1>
+<p>This document complements the project README by detailing the workflow, data contracts, and responsibilities of each MATLAB component in the Timoshenko beam finite element toolkit. Use it when you are extending the codebase, integrating it into larger studies, or validating solver behaviour.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#1-overview">1. Overview</a></li>
+<li><a href="#2-system-architecture">2. System Architecture</a></li>
+<li><a href="#3-data-contracts">3. Data Contracts</a></li>
+<li><a href="#4-module-reference">4. Module Reference</a></li>
+<li><a href="#5-algorithmic-notes">5. Algorithmic Notes</a></li>
+<li><a href="#6-diagnostics-and-error-handling">6. Diagnostics and Error Handling</a></li>
+<li><a href="#7-extending-the-toolkit">7. Extending the Toolkit</a></li>
+<li><a href="#8-verification-strategy">8. Verification Strategy</a></li>
+<li><a href="#9-glossary">9. Glossary</a></li>
+</ul>
+<hr>
+<h2 id="1-overview">1. Overview</h2>
+<p>The toolkit solves planar beam problems using Timoshenko theory, accounting for both bending and shear deformations. A single MATLAB driver handles path setup, workbook parsing, solver execution, reporting, and plotting. Each responsibility is isolated in its own function so that contributors can experiment without destabilising the full workflow.</p>
+<p>Key goals of the module architecture:</p>
+<ul>
+<li>keep input preparation lightweight (Excel-based)</li>
+<li>ensure solver internals are transparent and traceable</li>
+<li>surface rich metadata about response maxima for automated reporting</li>
+<li>provide clean extension points for new cross-sections, load cases, or renderers</li>
+</ul>
+<hr>
+<h2 id="2-system-architecture">2. System Architecture</h2>
+<h3 id="21-execution-pipeline">2.1 Execution Pipeline</h3>
+<pre><code>TimoshenkoBeamFEA (script entry)
+  ├─ readInputData (Excel ingestion)
+  ├─ plotBeamSystem (pre-analysis plot)
+  ├─ performTimoshenkoFEA (solver core)
+  │    ├─ calculateTimoshenkoSectionProperties
+  │    ├─ calculateTimoshenkoStiffness (per element)
+  │    └─ calculateTimoshenkoStresses (post-processing)
+  ├─ displayResults (displacement summary)
+  ├─ plotDeformedShape → getColorFromValue
+  └─ prepareStressReportEntries
+         ├─ computeBendingExtremaSummary
+         ├─ computeShearExtremaSummary
+         └─ computeVonMisesExtremaSummary
+</code></pre>
+<h3 id="22-directory-responsibilities">2.2 Directory Responsibilities</h3>
+<ul>
+<li><code>scripts/</code>: UC-level entry points and orchestration logic.</li>
+<li><code>src/io/</code>: External data ingestion and normalisation.</li>
+<li><code>src/properties/</code>: Cross-section derived properties and shear correction factors.</li>
+<li><code>src/analysis/</code>: Element matrices, global assembly, solution, and stress recovery.</li>
+<li><code>src/reporting/</code>: Summaries, metadata extraction, and formatting helpers.</li>
+<li><code>src/visualization/</code>: Diagnostic and presentation-quality figures.</li>
+</ul>
+<hr>
+<h2 id="3-data-contracts">3. Data Contracts</h2>
+<h3 id="31-input-workbook">3.1 Input Workbook</h3>
+<ul>
+<li><strong>Nodes</strong>: columns <code>NodeID</code>, <code>X</code>, <code>Y</code>. IDs must be consecutive integers; coordinates in metres.</li>
+<li><strong>Elements</strong>: columns <code>ElementID</code>, <code>Node1</code>, <code>Node2</code>. Node references must exist in the Nodes sheet.</li>
+<li><strong>Supports</strong>: columns <code>NodeID</code>, <code>Type</code> (<code>Fixed</code>, <code>Pinned</code>, <code>Roller</code>). Types are case-insensitive.</li>
+<li><strong>Forces</strong>: columns <code>NodeID</code>, <code>Fx</code>, <code>Fy</code>, <code>Mz</code>. Forces in Newtons, moment in Newton-metres. The <code>Mz</code> column must be present even if zero.</li>
+<li><strong>Properties</strong>: minimum <code>YoungsModulus</code>, <code>CrossSectionalArea</code>, <code>Density</code>. Optional fields <code>SectionType</code>, <code>Width</code>, <code>Height</code>, <code>Diameter</code>, <code>ShearModulus</code>, <code>PoissonRatio</code> refine section behaviour.</li>
+</ul>
+<p>Each sheet begins with headers on row 1. Data spans rows 2..N. Empty trailing rows are ignored by MATLAB's table reader.</p>
+<h3 id="32-solver-outputs">3.2 Solver Outputs</h3>
+<ul>
+<li><code>displacements</code>: global vector <code>[u1, v1, theta1, u2, ...]</code> (metres, radians).</li>
+<li><code>stresses</code>: struct containing element-wise response metrics:
+<ul>
+<li><code>elemental</code>: combined von-Mises-style stress (Pa).</li>
+<li><code>bending_moments</code>, <code>shear_forces</code> (N·m, N) and their derived stresses (Pa).</li>
+<li><code>bending_details</code>, <code>shear_details</code>, <code>von_mises_details</code>: metadata describing which element, plane, and end produced the maxima.</li>
+<li><code>element_positions</code>: mid-span coordinates for plotting or sorting.</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2 id="4-module-reference">4. Module Reference</h2>
+<h3 id="41-scriptstimoshenkobeamfeam">4.1 <code>scripts/TimoshenkoBeamFEA.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: User-facing entry point. Validates inputs, prepares MATLAB paths, invokes solver, triggers reporting and figures.</li>
+<li><strong>Inputs</strong>: optional workbook path (string). Defaults to <code>data/input_data.xlsx</code> relative to the repository root.</li>
+<li><strong>Outputs</strong>: none (side-effects: console output, figure windows). Returns displacement and stress structs only when invoked through nested calls.</li>
+<li><strong>Key Steps</strong>:
+<ol>
+<li>Add <code>src/</code> to MATLAB path if absent.</li>
+<li>Validate workbook path, falling back to sample data when omitted.</li>
+<li>Load model data via <code>readInputData</code>.</li>
+<li>Render undeformed geometry (<code>plotBeamSystem</code>).</li>
+<li>Run solver and collect <code>displacements</code>/<code>stresses</code>.</li>
+<li>Print displacement summary (<code>displayResults</code>).</li>
+<li>Plot deformed configuration (<code>plotDeformedShape</code>).</li>
+<li>Format stress extrema (<code>prepareStressReportEntries</code>) and emit console lines.</li>
+</ol>
+</li>
+<li><strong>Extension Hooks</strong>: Insert custom analysis steps or exports after the solver call but before figures to capture intermediate data.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">TimoshenkoBeamFEA</span><span class="hljs-params">(inputWorkbook)</span></span>
+  projectRoot = fileparts(mfilename(<span class="hljs-string">&#x27;fullpath&#x27;</span>));
+  srcFolder = fullfile(projectRoot, <span class="hljs-string">&#x27;src&#x27;</span>);
+  addpath(genpath(srcFolder));
+
+  <span class="hljs-keyword">if</span> nargin &lt; <span class="hljs-number">1</span> || <span class="hljs-built_in">isempty</span>(inputWorkbook)
+    inputWorkbook = fullfile(projectRoot, <span class="hljs-string">&#x27;data&#x27;</span>, <span class="hljs-string">&#x27;input_data.xlsx&#x27;</span>);
+  <span class="hljs-keyword">end</span>
+  assert(isfile(inputWorkbook), <span class="hljs-string">&#x27;Input workbook not found: %s&#x27;</span>, inputWorkbook);
+
+  [nodes, elements, supports, forces, E, A, density, sectionType, width, height, diameter, G, nu] = ...
+    readInputData(inputWorkbook);
+
+  plotBeamSystem(nodes, elements, supports, forces);
+
+  [displacements, stresses] = performTimoshenkoFEA(nodes, elements, supports, forces, ...
+    E, A, density, sectionType, width, height, diameter, G, nu);
+
+  displayResults(displacements);
+  plotDeformedShape(nodes, elements, displacements);
+
+  entries = prepareStressReportEntries(stresses);
+  <span class="hljs-keyword">for</span> iEntry = <span class="hljs-number">1</span>:<span class="hljs-built_in">numel</span>(entries)
+    fprintf(<span class="hljs-string">&#x27;%s\n&#x27;</span>, entries(iEntry).message);
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="42-srcioreadinputdatam">4.2 <code>src/io/readInputData.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Normalise Excel workbook content into MATLAB arrays and scalars.</li>
+<li><strong>Validations</strong>: checks sheet existence, required columns, and minimum dataset sizes. Throws descriptive errors when structure deviates from the contract.</li>
+<li><strong>Transformations</strong>:
+<ul>
+<li>Converts tables to numeric matrices and string arrays.</li>
+<li>Normalises support type strings and trims whitespace.</li>
+<li>Derives shear modulus from Poisson's ratio when <code>ShearModulus</code> is absent.</li>
+<li>Emits console summary (counts and material constants) for transparency.</li>
+</ul>
+</li>
+<li><strong>Edge Cases</strong>: accepts variant column casing (e.g., <code>nodeid</code>) by normalising headers. Warns if area or density is zero, since those values impact self-weight.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-params">[nodes, elements, supports, forces, E, A, density, sectionType, width, height, diameter, G, nu]</span> = ...</span>
+  readInputData(inputWorkbook)
+
+  <span class="hljs-keyword">if</span> nargin &lt; <span class="hljs-number">1</span> || <span class="hljs-built_in">isempty</span>(inputWorkbook)
+    inputWorkbook = <span class="hljs-string">&#x27;input_data.xlsx&#x27;</span>;
+  <span class="hljs-keyword">end</span>
+  assert(isfile(inputWorkbook), <span class="hljs-string">&#x27;Workbook missing: %s&#x27;</span>, inputWorkbook);
+
+  nodesTbl     = <span class="hljs-built_in">readtable</span>(inputWorkbook, <span class="hljs-string">&#x27;Sheet&#x27;</span>, <span class="hljs-string">&#x27;Nodes&#x27;</span>);
+  elementsTbl  = <span class="hljs-built_in">readtable</span>(inputWorkbook, <span class="hljs-string">&#x27;Sheet&#x27;</span>, <span class="hljs-string">&#x27;Elements&#x27;</span>);
+  supportsTbl  = <span class="hljs-built_in">readtable</span>(inputWorkbook, <span class="hljs-string">&#x27;Sheet&#x27;</span>, <span class="hljs-string">&#x27;Supports&#x27;</span>);
+  forcesTbl    = <span class="hljs-built_in">readtable</span>(inputWorkbook, <span class="hljs-string">&#x27;Sheet&#x27;</span>, <span class="hljs-string">&#x27;Forces&#x27;</span>);
+  propsTbl     = <span class="hljs-built_in">readtable</span>(inputWorkbook, <span class="hljs-string">&#x27;Sheet&#x27;</span>, <span class="hljs-string">&#x27;Properties&#x27;</span>);
+
+  nodesTbl     = normaliseHeaders(nodesTbl);
+  elementsTbl  = normaliseHeaders(elementsTbl);
+  supportsTbl  = normaliseHeaders(supportsTbl);
+  forcesTbl    = normaliseHeaders(forcesTbl);
+  propsTbl     = normaliseHeaders(propsTbl);
+
+  validateNodes(nodesTbl);
+  validateElements(elementsTbl, nodesTbl.NodeID);
+  validateSupports(supportsTbl, nodesTbl.NodeID);
+  validateForces(forcesTbl, nodesTbl.NodeID);
+  validateProperties(propsTbl);
+
+  nodes    = table2array(nodesTbl(:, {<span class="hljs-string">&#x27;NodeID&#x27;</span>, <span class="hljs-string">&#x27;X&#x27;</span>, <span class="hljs-string">&#x27;Y&#x27;</span>}));
+  elements = table2array(elementsTbl(:, {<span class="hljs-string">&#x27;ElementID&#x27;</span>, <span class="hljs-string">&#x27;Node1&#x27;</span>, <span class="hljs-string">&#x27;Node2&#x27;</span>}));
+
+  supports.NodeID = supportsTbl.NodeID;
+  supports.Type   = string(lower(strtrim(supportsTbl.Type)));
+
+  forces = table2array(forcesTbl(:, {<span class="hljs-string">&#x27;NodeID&#x27;</span>, <span class="hljs-string">&#x27;Fx&#x27;</span>, <span class="hljs-string">&#x27;Fy&#x27;</span>, <span class="hljs-string">&#x27;Mz&#x27;</span>}));
+
+  E         = propsTbl.YoungsModulus(<span class="hljs-number">1</span>);
+  A         = propsTbl.CrossSectionalArea(<span class="hljs-number">1</span>);
+  density   = propsTbl.Density(<span class="hljs-number">1</span>);
+  sectionType = string(propsTbl.SectionType(<span class="hljs-number">1</span>));
+  width     = propsTbl.Width(<span class="hljs-number">1</span>);
+  height    = propsTbl.Height(<span class="hljs-number">1</span>);
+  diameter  = propsTbl.Diameter(<span class="hljs-number">1</span>);
+  G         = propsTbl.ShearModulus(<span class="hljs-number">1</span>);
+  nu        = propsTbl.PoissonRatio(<span class="hljs-number">1</span>);
+
+  <span class="hljs-keyword">if</span> <span class="hljs-built_in">isnan</span>(G) &amp;&amp; ~<span class="hljs-built_in">isnan</span>(nu)
+    G = E / (<span class="hljs-number">2</span> * (<span class="hljs-number">1</span> + nu));
+  <span class="hljs-keyword">end</span>
+
+  logWorkbookSummary(nodes, elements, supports, forces, E, A, density);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="43-srcpropertiescalculatetimoshenkosectionpropertiesm">4.3 <code>src/properties/calculateTimoshenkoSectionProperties.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Compute second moment of area (<code>I</code>), effective shear area (<code>As</code>), maximum fibre distance, and shear correction factor (<code>ky</code>).</li>
+<li><strong>Shape Support</strong>: <code>Rectangle</code>, <code>Square</code>, <code>Circle</code>. Fallback path assumes a rectangular profile with area-derived dimensions and warns users about conservative assumptions.</li>
+<li><strong>Usage</strong>: Called once per analysis. Downstream routines rely on consistent <code>As</code> and <code>maxDistance</code> for stress recovery.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-params">[I, As, maxDistance, ky]</span> = <span class="hljs-title">calculateTimoshenkoSectionProperties</span><span class="hljs-params">(sectionType, A, width, height, diameter)</span></span>
+  sectionType = lower(strip(sectionType));
+
+  <span class="hljs-keyword">switch</span> sectionType
+    <span class="hljs-keyword">case</span> <span class="hljs-string">&#x27;rectangle&#x27;</span>
+      I = width * height^<span class="hljs-number">3</span> / <span class="hljs-number">12</span>;
+      maxDistance = height / <span class="hljs-number">2</span>;
+      ky = <span class="hljs-number">5</span> / <span class="hljs-number">6</span>;
+    <span class="hljs-keyword">case</span> <span class="hljs-string">&#x27;square&#x27;</span>
+      I = width^<span class="hljs-number">4</span> / <span class="hljs-number">12</span>;
+      maxDistance = width / <span class="hljs-number">2</span>;
+      ky = <span class="hljs-number">5</span> / <span class="hljs-number">6</span>;
+    <span class="hljs-keyword">case</span> <span class="hljs-string">&#x27;circle&#x27;</span>
+      I = (<span class="hljs-built_in">pi</span> * diameter^<span class="hljs-number">4</span>) / <span class="hljs-number">64</span>;
+      maxDistance = diameter / <span class="hljs-number">2</span>;
+      ky = <span class="hljs-number">9</span> / <span class="hljs-number">10</span>;
+    <span class="hljs-keyword">otherwise</span>
+      inferredDepth = <span class="hljs-built_in">sqrt</span>(A);
+      I = inferredDepth^<span class="hljs-number">4</span> / <span class="hljs-number">12</span>;
+      maxDistance = inferredDepth / <span class="hljs-number">2</span>;
+      ky = <span class="hljs-number">5</span> / <span class="hljs-number">6</span>;
+      warning(<span class="hljs-string">&#x27;Unknown section type; assuming square with area %g m^2.&#x27;</span>, A);
+  <span class="hljs-keyword">end</span>
+
+  As = ky * A;
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="44-srcanalysiscalculatetimoshenkostiffnessm">4.4 <code>src/analysis/calculateTimoshenkoStiffness.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Return the 6×6 local stiffness matrix for a 2-node Timoshenko beam element.</li>
+<li><strong>Formulae</strong>:
+<ul>
+<li>Applies shear flexibility correction <code>phi = 12 E I / (G As L²)</code>.</li>
+<li>Recovers Euler-Bernoulli stiffness when shear effects vanish (<code>phi → 0</code>).</li>
+</ul>
+</li>
+<li><strong>Numerical Notes</strong>: Terms are symmetric; rounding errors are mitigated by constructing each symmetric pair once and mirroring.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">kLocal</span> = <span class="hljs-title">calculateTimoshenkoStiffness</span><span class="hljs-params">(E, G, A, As, I, L)</span></span>
+  phi = <span class="hljs-number">12</span> * E * I / (G * As * L^<span class="hljs-number">2</span>);
+  kappa = <span class="hljs-number">1</span> + phi;
+
+  EA = E * A / L;
+  EI = E * I / (L^<span class="hljs-number">3</span> * kappa);
+  GAs = G * As / L;
+
+  kLocal = <span class="hljs-built_in">zeros</span>(<span class="hljs-number">6</span>, <span class="hljs-number">6</span>);
+
+  <span class="hljs-comment">% Axial terms</span>
+  kLocal([<span class="hljs-number">1</span>,<span class="hljs-number">4</span>],[<span class="hljs-number">1</span>,<span class="hljs-number">4</span>]) = EA * [ <span class="hljs-number">1</span>, <span class="hljs-number">-1</span>; <span class="hljs-number">-1</span>, <span class="hljs-number">1</span>];
+
+  <span class="hljs-comment">% Shear-bending coupling</span>
+  kLocal([<span class="hljs-number">2</span>,<span class="hljs-number">5</span>],[<span class="hljs-number">2</span>,<span class="hljs-number">5</span>]) = GAs * [ kappa, -kappa; -kappa, kappa];
+  kLocal([<span class="hljs-number">2</span>,<span class="hljs-number">5</span>],[<span class="hljs-number">3</span>,<span class="hljs-number">6</span>]) = EI * L * [ <span class="hljs-number">6</span>, <span class="hljs-number">-6</span>; <span class="hljs-number">6</span>, <span class="hljs-number">-6</span>];
+  kLocal([<span class="hljs-number">3</span>,<span class="hljs-number">6</span>],[<span class="hljs-number">2</span>,<span class="hljs-number">5</span>]) = EI * L * [ <span class="hljs-number">6</span>, <span class="hljs-number">6</span>; <span class="hljs-number">-6</span>, <span class="hljs-number">-6</span>];
+
+  <span class="hljs-comment">% Rotational stiffness</span>
+  rotBlock = EI * L^<span class="hljs-number">2</span> * [ (<span class="hljs-number">4</span> + phi), (<span class="hljs-number">2</span> - phi); (<span class="hljs-number">2</span> - phi), (<span class="hljs-number">4</span> + phi) ];
+  kLocal([<span class="hljs-number">3</span>,<span class="hljs-number">6</span>],[<span class="hljs-number">3</span>,<span class="hljs-number">6</span>]) = rotBlock;
+
+  <span class="hljs-comment">% Enforce symmetry explicitly</span>
+  kLocal = (kLocal + kLocal.&#x27;)./<span class="hljs-number">2</span>;
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="45-srcanalysisperformtimoshenkofeam">4.5 <code>src/analysis/performTimoshenkoFEA.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: End-to-end finite element solve.</li>
+<li><strong>Subtasks</strong>:
+<ol>
+<li>Preallocate global stiffness matrix (<code>K</code>) and load vector (<code>F</code>).</li>
+<li>Derive section properties and print summary.</li>
+<li>Loop through elements to assemble <code>K</code> using direction cosines and transformed local stiffness matrices.</li>
+<li>Map nodal loads and equivalent self-weight contributions into <code>F</code> (gravity = 9.80665 m/s² by default).</li>
+<li>Apply boundary conditions by extracting free degrees of freedom and solving <code>K_ff · u_f = F_f</code>.</li>
+<li>Call <code>calculateTimoshenkoStresses</code> for post-processing.</li>
+</ol>
+</li>
+<li><strong>Diagnostics</strong>: warns when <code>rcond(K_ff)</code> is below a tolerance, hinting at singular systems or poor constraint definitions.</li>
+<li><strong>Outputs</strong>: populates the displacement vector for all DOFs (constrained DOFs remain zero) and assembles a rich <code>stresses</code> struct.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-params">[displacements, stresses]</span> = <span class="hljs-title">performTimoshenkoFEA</span><span class="hljs-params">(nodes, elements, supports, forces, ...
+  E, A, density, sectionType, width, height, diameter, G, nu)</span></span>
+
+  numNodes = <span class="hljs-built_in">size</span>(nodes, <span class="hljs-number">1</span>);
+  numElements = <span class="hljs-built_in">size</span>(elements, <span class="hljs-number">1</span>);
+  totalDof = <span class="hljs-number">3</span> * numNodes;
+
+  displacements = <span class="hljs-built_in">zeros</span>(totalDof, <span class="hljs-number">1</span>);
+  globalK = <span class="hljs-built_in">zeros</span>(totalDof);
+  globalF = <span class="hljs-built_in">zeros</span>(totalDof, <span class="hljs-number">1</span>);
+
+  [I, As, maxDistance, ky] = calculateTimoshenkoSectionProperties(sectionType, A, width, height, diameter);
+
+  <span class="hljs-keyword">for</span> e = <span class="hljs-number">1</span>:numElements
+    nodeIds = elements(e, <span class="hljs-number">2</span>:<span class="hljs-number">3</span>);
+    n1 = nodeIds(<span class="hljs-number">1</span>);
+    n2 = nodeIds(<span class="hljs-number">2</span>);
+
+    x1 = nodes(nodes(:,<span class="hljs-number">1</span>) == n1, <span class="hljs-number">2</span>:<span class="hljs-number">3</span>);
+    x2 = nodes(nodes(:,<span class="hljs-number">1</span>) == n2, <span class="hljs-number">2</span>:<span class="hljs-number">3</span>);
+
+    delta = x2 - x1;
+    L = norm(delta);
+    c = delta(<span class="hljs-number">1</span>) / L;
+    s = delta(<span class="hljs-number">2</span>) / L;
+
+    kLocal = calculateTimoshenkoStiffness(E, G, A, As, I, L);
+    T = buildTransformationMatrix(c, s);
+    kGlobal = T.&#x27; * kLocal * T;
+
+    dofIdx = elementDofIndices(nodeIds);
+    globalK(dofIdx, dofIdx) = globalK(dofIdx, dofIdx) + kGlobal;
+
+    elementWeight = density * A * L * <span class="hljs-number">9.80665</span>;
+    fBodyLocal = consistentBeamLoad(elementWeight, L);
+    fBodyGlobal = T.&#x27; * fBodyLocal;
+    globalF(dofIdx) = globalF(dofIdx) + fBodyGlobal;
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-keyword">for</span> f = <span class="hljs-number">1</span>:<span class="hljs-built_in">size</span>(forces, <span class="hljs-number">1</span>)
+    nodeId = forces(f, <span class="hljs-number">1</span>);
+    dofIdx = nodeDofIndices(nodeId);
+    globalF(dofIdx(<span class="hljs-number">1</span>:<span class="hljs-number">3</span>)) = globalF(dofIdx(<span class="hljs-number">1</span>:<span class="hljs-number">3</span>)) + forces(f, <span class="hljs-number">2</span>:<span class="hljs-number">4</span>).&#x27;;
+  <span class="hljs-keyword">end</span>
+
+  constrained = supportsToConstrainedDof(supports);
+  freeDof = setdiff(<span class="hljs-number">1</span>:totalDof, constrained);
+
+  Kff = globalK(freeDof, freeDof);
+  Ff = globalF(freeDof);
+  displacements(freeDof) = Kff \ Ff;
+
+  [stresses.elemental, stresses.bending_moments, stresses.shear_forces, ...
+    stresses.shear_stresses, stresses.element_positions, stresses.bending_details, ...
+    stresses.shear_details, stresses.von_mises_details, stresses.von_mises] = ...
+    calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As, I, ...
+      maxDistance, sectionType, width, height, diameter, density);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="46-srcanalysiscalculatetimoshenkostressesm">4.6 <code>src/analysis/calculateTimoshenkoStresses.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Translate displacements into internal forces and stress measures.</li>
+<li><strong>Process</strong>:
+<ul>
+<li>Builds transformation matrices to rotate global displacements into local element frames.</li>
+<li>Computes axial strain/force and shear strain/force using Timoshenko relations.</li>
+<li>Recovers bending moments at each end from the consistent stiffness formulation.</li>
+<li>Subtracts self-weight contributions so reported internal forces reflect applied loading only.</li>
+<li>Calculates bending stresses at top/bottom fibres and a von-Mises-style combined stress.</li>
+<li>Captures metadata (element index, sign, plane, end) for maxima in bending, shear, and combined responses.</li>
+</ul>
+</li>
+<li><strong>Sanity Checks</strong>: compares computed section modulus against geometric inputs for supported shapes, issuing warnings when deviations exceed ±20%.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-params">[elemental, bendingMoments, shearForces, shearStresses, elementPositions, ...
+  bendingDetails, shearDetails, vonMisesDetails, vonMises]</span> = ...</span>
+  calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As, I, maxDistance, ...
+  sectionType, width, height, diameter, density)
+
+  numElements = <span class="hljs-built_in">size</span>(elements, <span class="hljs-number">1</span>);
+  elemental       = <span class="hljs-built_in">zeros</span>(numElements, <span class="hljs-number">1</span>);
+  bendingMoments  = <span class="hljs-built_in">zeros</span>(numElements, <span class="hljs-number">1</span>);
+  shearForces     = <span class="hljs-built_in">zeros</span>(numElements, <span class="hljs-number">1</span>);
+  shearStresses   = <span class="hljs-built_in">zeros</span>(numElements, <span class="hljs-number">1</span>);
+  vonMises        = <span class="hljs-built_in">zeros</span>(numElements, <span class="hljs-number">1</span>);
+  elementPositions = <span class="hljs-built_in">zeros</span>(numElements, <span class="hljs-number">2</span>);
+
+  sectionModulus = I / <span class="hljs-built_in">max</span>(maxDistance, <span class="hljs-built_in">eps</span>);
+
+  <span class="hljs-keyword">for</span> e = <span class="hljs-number">1</span>:numElements
+    nodeIds = elements(e, <span class="hljs-number">2</span>:<span class="hljs-number">3</span>);
+    dofIdx = elementDofIndices(nodeIds);
+    dGlobal = displacements(dofIdx);
+
+    coords = nodes(nodeIndices(nodes, nodeIds), <span class="hljs-number">2</span>:<span class="hljs-number">3</span>);
+    L = norm(diff(coords));
+    c = (coords(<span class="hljs-number">2</span>,<span class="hljs-number">1</span>) - coords(<span class="hljs-number">1</span>,<span class="hljs-number">1</span>)) / L;
+    s = (coords(<span class="hljs-number">2</span>,<span class="hljs-number">2</span>) - coords(<span class="hljs-number">1</span>,<span class="hljs-number">2</span>)) / L;
+
+    T = buildTransformationMatrix(c, s);
+    dLocal = T * dGlobal;
+
+    axialStrain = (dLocal(<span class="hljs-number">4</span>) - dLocal(<span class="hljs-number">1</span>)) / L;
+    avgTheta = <span class="hljs-number">0.5</span> * (dLocal(<span class="hljs-number">3</span>) + dLocal(<span class="hljs-number">6</span>));
+    shearStrain = (dLocal(<span class="hljs-number">5</span>) - dLocal(<span class="hljs-number">2</span>)) / L - avgTheta;
+
+    axialForce = E * A * axialStrain;
+    shearForce = G * As * shearStrain;
+
+    kLocal = calculateTimoshenkoStiffness(E, G, A, As, I, L);
+    fLocal = kLocal * dLocal;
+
+    weight = density * A * L * <span class="hljs-number">9.80665</span>;
+    fWeightLocal = consistentBeamLoad(weight, L);
+    fLocal = fLocal - fWeightLocal;
+
+    momentA = fLocal(<span class="hljs-number">3</span>);
+    momentB = fLocal(<span class="hljs-number">6</span>);
+
+    bendingMoments(e) = <span class="hljs-built_in">max</span>(<span class="hljs-built_in">abs</span>([momentA, momentB]));
+    shearForces(e) = <span class="hljs-built_in">max</span>(<span class="hljs-built_in">abs</span>([shearForce, -shearForce]));
+    shearStresses(e) = shearForce / As;
+
+    bendingPlaneValues = [ -momentA, -momentB; momentA, momentB ] / sectionModulus;
+    bendingEnvelope = <span class="hljs-built_in">max</span>(<span class="hljs-built_in">abs</span>(bendingPlaneValues(:)));
+
+    axialStress = axialForce / A;
+    vonMises(e) = <span class="hljs-built_in">sqrt</span>(axialStress^<span class="hljs-number">2</span> + bendingEnvelope^<span class="hljs-number">2</span> + <span class="hljs-number">3</span> * shearStresses(e)^<span class="hljs-number">2</span>);
+    elemental(e) = vonMises(e);
+
+    elementPositions(e, :) = <span class="hljs-built_in">mean</span>(coords, <span class="hljs-number">1</span>);
+
+    bendingDetails = updateBendingMetadata(bendingDetails, e, bendingPlaneValues, [momentA, momentB]);
+    shearDetails   = updateShearMetadata(shearDetails, e, shearForce, shearStresses(e));
+    vonMisesDetails = updateVonMisesMetadata(vonMisesDetails, e, vonMises(e), bendingPlaneValues, shearStresses(e));
+  <span class="hljs-keyword">end</span>
+
+  performSectionModulusCheck(sectionType, width, height, diameter, A, sectionModulus);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="47-srcreportingdisplayresultsm">4.7 <code>src/reporting/displayResults.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Provide a quick displacement overview.</li>
+<li><strong>Output</strong>: formatted console text summarising maximum horizontal displacement (<code>ux</code>), vertical displacement (<code>uy</code>), rotation (<code>theta</code>), and resultant magnitude per node, with qualitative guidance (small/moderate/large).</li>
+<li><strong>Implementation Detail</strong>: loops operate on DOF indices using modular arithmetic (<code>mod(i, 3)</code> style) to separate translational and rotational components.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">displayResults</span><span class="hljs-params">(displacements)</span></span>
+  numNodes = <span class="hljs-built_in">numel</span>(displacements) / <span class="hljs-number">3</span>;
+
+  ux = displacements(<span class="hljs-number">1</span>:<span class="hljs-number">3</span>:<span class="hljs-keyword">end</span>);
+  uy = displacements(<span class="hljs-number">2</span>:<span class="hljs-number">3</span>:<span class="hljs-keyword">end</span>);
+  theta = displacements(<span class="hljs-number">3</span>:<span class="hljs-number">3</span>:<span class="hljs-keyword">end</span>);
+
+  mag = <span class="hljs-built_in">hypot</span>(ux, uy);
+
+  [maxUx, idxUx] = <span class="hljs-built_in">max</span>(<span class="hljs-built_in">abs</span>(ux));
+  [maxUy, idxUy] = <span class="hljs-built_in">max</span>(<span class="hljs-built_in">abs</span>(uy));
+  [maxTheta, idxTheta] = <span class="hljs-built_in">max</span>(<span class="hljs-built_in">abs</span>(theta));
+  [maxMag, idxMag] = <span class="hljs-built_in">max</span>(mag);
+
+  fprintf(<span class="hljs-string">&#x27;Max |ux| = %.6e m at node %d\n&#x27;</span>, maxUx, idxUx);
+  fprintf(<span class="hljs-string">&#x27;Max |uy| = %.6e m at node %d\n&#x27;</span>, maxUy, idxUy);
+  fprintf(<span class="hljs-string">&#x27;Max |theta| = %.6e rad at node %d\n&#x27;</span>, maxTheta, idxTheta);
+  fprintf(<span class="hljs-string">&#x27;Max |u| = %.6e m at node %d\n&#x27;</span>, maxMag, idxMag);
+
+  <span class="hljs-keyword">if</span> maxMag &gt; <span class="hljs-number">1e-2</span>
+    fprintf(<span class="hljs-string">&#x27;Large displacements detected; review assumptions.\n&#x27;</span>);
+  <span class="hljs-keyword">elseif</span> maxMag &gt; <span class="hljs-number">1e-4</span>
+    fprintf(<span class="hljs-string">&#x27;Moderate displacements observed.\n&#x27;</span>);
+  <span class="hljs-keyword">else</span>
+    fprintf(<span class="hljs-string">&#x27;Displacements are small relative to beam length.\n&#x27;</span>);
+  <span class="hljs-keyword">end</span>
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="48-srcvisualizationplotbeamsystemm">4.8 <code>src/visualization/plotBeamSystem.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Render the undeformed model for validation before solving.</li>
+<li><strong>Features</strong>:
+<ul>
+<li>Element connectivity displayed as polylines.</li>
+<li>Supports coloured by type (e.g., fixed/green, pinned/red, roller/blue).</li>
+<li>Forces drawn as quiver arrows scaled heuristically; nodal moments indicated by circular arrows.</li>
+<li>Data tips expose node IDs and coordinates via a custom callback.</li>
+</ul>
+</li>
+<li><strong>Usage</strong>: called automatically by the driver; can be invoked independently for debugging workbook layouts.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">plotBeamSystem</span><span class="hljs-params">(nodes, elements, supports, forces)</span></span>
+  <span class="hljs-built_in">figure</span>(<span class="hljs-string">&#x27;Name&#x27;</span>, <span class="hljs-string">&#x27;Undeformed Beam System&#x27;</span>);
+  axis equal; grid on; <span class="hljs-built_in">hold</span> on;
+
+  nodeCoords = containers.Map(nodes(:,<span class="hljs-number">1</span>), <span class="hljs-built_in">num2cell</span>(nodes(:,<span class="hljs-number">2</span>:<span class="hljs-number">3</span>), <span class="hljs-number">2</span>));
+
+  <span class="hljs-keyword">for</span> e = <span class="hljs-number">1</span>:<span class="hljs-built_in">size</span>(elements, <span class="hljs-number">1</span>)
+    n1 = elements(e, <span class="hljs-number">2</span>);
+    n2 = elements(e, <span class="hljs-number">3</span>);
+    p1 = nodeCoords(n1);
+    p2 = nodeCoords(n2);
+    <span class="hljs-built_in">plot</span>([p1(<span class="hljs-number">1</span>), p2(<span class="hljs-number">1</span>)], [p1(<span class="hljs-number">2</span>), p2(<span class="hljs-number">2</span>)], <span class="hljs-string">&#x27;k-&#x27;</span>, <span class="hljs-string">&#x27;LineWidth&#x27;</span>, <span class="hljs-number">2</span>);
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-built_in">scatter</span>(nodes(:,<span class="hljs-number">2</span>), nodes(:,<span class="hljs-number">3</span>), <span class="hljs-number">40</span>, <span class="hljs-string">&#x27;k&#x27;</span>, <span class="hljs-string">&#x27;filled&#x27;</span>);
+
+  supportColours = struct(<span class="hljs-string">&#x27;fixed&#x27;</span>, <span class="hljs-string">&#x27;g&#x27;</span>, <span class="hljs-string">&#x27;pinned&#x27;</span>, <span class="hljs-string">&#x27;r&#x27;</span>, <span class="hljs-string">&#x27;roller&#x27;</span>, <span class="hljs-string">&#x27;b&#x27;</span>);
+  <span class="hljs-keyword">for</span> k = <span class="hljs-number">1</span>:<span class="hljs-built_in">numel</span>(supports.NodeID)
+    nodeId = supports.NodeID(k);
+    pt = nodeCoords(nodeId);
+    t = supports.Type(k);
+    colour = supportColours.(char(t));
+    <span class="hljs-built_in">scatter</span>(pt(<span class="hljs-number">1</span>), pt(<span class="hljs-number">2</span>), <span class="hljs-number">80</span>, colour, <span class="hljs-string">&#x27;filled&#x27;</span>);
+  <span class="hljs-keyword">end</span>
+
+  scale = computeForceScale(forces(:,<span class="hljs-number">2</span>:<span class="hljs-number">3</span>));
+  quiver(nodes(:,<span class="hljs-number">2</span>), nodes(:,<span class="hljs-number">3</span>), scale*forces(:,<span class="hljs-number">2</span>), scale*forces(:,<span class="hljs-number">3</span>), <span class="hljs-number">0</span>, <span class="hljs-string">&#x27;m&#x27;</span>, <span class="hljs-string">&#x27;LineWidth&#x27;</span>, <span class="hljs-number">1.5</span>);
+
+  drawMoments(nodes, forces(:,<span class="hljs-number">4</span>));
+  title(<span class="hljs-string">&#x27;Undeformed geometry, supports, and applied loads&#x27;</span>);
+  xlabel(<span class="hljs-string">&#x27;X [m]&#x27;</span>); ylabel(<span class="hljs-string">&#x27;Y [m]&#x27;</span>);
+  <span class="hljs-built_in">hold</span> off;
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="49-srcvisualizationplotdeformedshapem">4.9 <code>src/visualization/plotDeformedShape.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Overlay undeformed and deformed shapes, colouring the deformed geometry by displacement magnitude.</li>
+<li><strong>Workflow</strong>:
+<ol>
+<li>Compute displacement magnitudes per node.</li>
+<li>Select a scaling factor (default 20×, capped to avoid nonphysical visuals).</li>
+<li>Plot undeformed geometry in grey, then the deformed curve with colour gradations provided by <code>getColorFromValue</code>.</li>
+<li>Annotate the maximum displacement value and display a colour bar.</li>
+</ol>
+</li>
+<li><strong>Extensibility</strong>: adjust scaling heuristics or colour schemes to suit publication standards.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">plotDeformedShape</span><span class="hljs-params">(nodes, elements, displacements)</span></span>
+  ux = displacements(<span class="hljs-number">1</span>:<span class="hljs-number">3</span>:<span class="hljs-keyword">end</span>);
+  uy = displacements(<span class="hljs-number">2</span>:<span class="hljs-number">3</span>:<span class="hljs-keyword">end</span>);
+  nodeIds = nodes(:,<span class="hljs-number">1</span>);
+  nodeUx = containers.Map(nodeIds, <span class="hljs-built_in">num2cell</span>(ux));
+  nodeUy = containers.Map(nodeIds, <span class="hljs-built_in">num2cell</span>(uy));
+
+  nodeCoords = containers.Map(nodeIds, <span class="hljs-built_in">num2cell</span>(nodes(:,<span class="hljs-number">2</span>:<span class="hljs-number">3</span>), <span class="hljs-number">2</span>));
+
+  mags = <span class="hljs-built_in">hypot</span>(ux, uy);
+  maxMag = <span class="hljs-built_in">max</span>(mags);
+  scale = pickScaleFactor(maxMag);
+
+  <span class="hljs-built_in">figure</span>(<span class="hljs-string">&#x27;Name&#x27;</span>, <span class="hljs-string">&#x27;Deformed Beam Shape&#x27;</span>);
+  <span class="hljs-built_in">hold</span> on; grid on; axis equal;
+
+  <span class="hljs-keyword">for</span> e = <span class="hljs-number">1</span>:<span class="hljs-built_in">size</span>(elements, <span class="hljs-number">1</span>)
+    n1 = elements(e,<span class="hljs-number">2</span>);
+    n2 = elements(e,<span class="hljs-number">3</span>);
+    p1 = nodeCoords(n1);
+    p2 = nodeCoords(n2);
+    <span class="hljs-built_in">plot</span>([p1(<span class="hljs-number">1</span>), p2(<span class="hljs-number">1</span>)], [p1(<span class="hljs-number">2</span>), p2(<span class="hljs-number">2</span>)], <span class="hljs-string">&#x27;Color&#x27;</span>, <span class="hljs-number">0.8</span>*[<span class="hljs-number">1</span> <span class="hljs-number">1</span> <span class="hljs-number">1</span>]);
+  <span class="hljs-keyword">end</span>
+
+  cmap = jet(<span class="hljs-number">256</span>);
+
+  <span class="hljs-keyword">for</span> e = <span class="hljs-number">1</span>:<span class="hljs-built_in">size</span>(elements, <span class="hljs-number">1</span>)
+    n1 = elements(e,<span class="hljs-number">2</span>);
+    n2 = elements(e,<span class="hljs-number">3</span>);
+    p1 = nodeCoords(n1);
+    p2 = nodeCoords(n2);
+    d1 = [nodeUx(n1); nodeUy(n1)];
+    d2 = [nodeUx(n2); nodeUy(n2)];
+
+    q1 = p1 + scale * d1.&#x27;;
+    q2 = p2 + scale * d2.&#x27;;
+
+    color1 = getColorFromValue(norm(d1), maxMag);
+    color2 = getColorFromValue(norm(d2), maxMag);
+
+    <span class="hljs-built_in">plot</span>([q1(<span class="hljs-number">1</span>), q2(<span class="hljs-number">1</span>)], [q1(<span class="hljs-number">2</span>), q2(<span class="hljs-number">2</span>)], <span class="hljs-string">&#x27;-&#x27;</span>, <span class="hljs-string">&#x27;Color&#x27;</span>, <span class="hljs-built_in">mean</span>([color1; color2], <span class="hljs-number">1</span>), <span class="hljs-string">&#x27;LineWidth&#x27;</span>, <span class="hljs-number">2</span>);
+  <span class="hljs-keyword">end</span>
+
+  <span class="hljs-built_in">scatter</span>(nodes(:,<span class="hljs-number">2</span>) + scale * ux, nodes(:,<span class="hljs-number">3</span>) + scale * uy, <span class="hljs-number">36</span>, mags, <span class="hljs-string">&#x27;filled&#x27;</span>);
+  colormap(cmap);
+  colorbar;
+  title(sprintf(<span class="hljs-string">&#x27;Deformed shape (scale %.1f), max displacement %.3e m&#x27;</span>, scale, maxMag));
+  xlabel(<span class="hljs-string">&#x27;X [m]&#x27;</span>); ylabel(<span class="hljs-string">&#x27;Y [m]&#x27;</span>);
+  <span class="hljs-built_in">hold</span> off;
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="410-srcvisualizationgetcolorfromvaluem">4.10 <code>src/visualization/getColorFromValue.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Map a scalar value to an RGB triple using MATLAB's <code>jet</code> colormap.</li>
+<li><strong>Behaviour</strong>: normalises by the supplied maximum, clamps indices to [1, 256], and returns the matching row from the colormap matrix. Handles zero-displacement cases gracefully.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">color</span> = <span class="hljs-title">getColorFromValue</span><span class="hljs-params">(value, maxValue)</span></span>
+  <span class="hljs-keyword">if</span> maxValue &lt;= <span class="hljs-number">0</span>
+    normalized = <span class="hljs-number">0</span>;
+  <span class="hljs-keyword">else</span>
+    normalized = <span class="hljs-built_in">min</span>(<span class="hljs-built_in">max</span>(value / maxValue, <span class="hljs-number">0</span>), <span class="hljs-number">1</span>);
+  <span class="hljs-keyword">end</span>
+
+  cmap = jet(<span class="hljs-number">256</span>);
+  idx = <span class="hljs-built_in">max</span>(<span class="hljs-number">1</span>, <span class="hljs-built_in">min</span>(<span class="hljs-number">256</span>, <span class="hljs-built_in">round</span>(normalized * <span class="hljs-number">255</span>) + <span class="hljs-number">1</span>));
+  color = cmap(idx, :);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="411-srcreportingpreparestressreportentriesm">4.11 <code>src/reporting/prepareStressReportEntries.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Convert raw metadata into human-readable report lines.</li>
+<li><strong>Operation</strong>:
+<ul>
+<li>Calls specialised summary helpers for bending, shear, and von Mises extrema.</li>
+<li>Builds structs containing magnitude, signed value, element ID, plane label, end label, and formatted text.</li>
+<li>Returns a struct that the driver iterates to print consistent console output.</li>
+</ul>
+</li>
+<li><strong>Extension</strong>: integrate additional limit states by writing new summary helpers and extending this formatter.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">entries</span> = <span class="hljs-title">prepareStressReportEntries</span><span class="hljs-params">(stresses)</span></span>
+  bending = computeBendingExtremaSummary(stresses);
+  shear = computeShearExtremaSummary(stresses);
+  vm = computeVonMisesExtremaSummary(stresses);
+
+  entries = struct([]);
+
+  entries(<span class="hljs-keyword">end</span>+<span class="hljs-number">1</span>).key = <span class="hljs-string">&#x27;maxBendingMoment&#x27;</span>;
+  entries(<span class="hljs-keyword">end</span>).value = bending.moment.magnitude;
+  entries(<span class="hljs-keyword">end</span>).message = sprintf(<span class="hljs-string">&#x27;Max bending moment %.3e N·m at element %d (%s, %s)&#x27;</span>, ...
+    bending.moment.magnitude, bending.moment.elementID, bending.moment.planeLabel, bending.moment.endLabel);
+
+  <span class="hljs-keyword">for</span> planeIdx = <span class="hljs-number">1</span>:<span class="hljs-built_in">numel</span>(bending.stressPlane)
+    plane = bending.stressPlane(planeIdx);
+    entries(<span class="hljs-keyword">end</span>+<span class="hljs-number">1</span>).key = sprintf(<span class="hljs-string">&#x27;maxBendingStressPlane%d&#x27;</span>, planeIdx);
+    entries(<span class="hljs-keyword">end</span>).value = plane.magnitude;
+    entries(<span class="hljs-keyword">end</span>).message = sprintf(<span class="hljs-string">&#x27;Max bending stress (plane %s) %.3e Pa at element %d (%s)&#x27;</span>, ...
+      plane.planeLabel, plane.magnitude, plane.elementID, plane.endLabel);
+  <span class="hljs-keyword">end</span>
+
+  entries(<span class="hljs-keyword">end</span>+<span class="hljs-number">1</span>).key = <span class="hljs-string">&#x27;maxBendingStressEnvelope&#x27;</span>;
+  entries(<span class="hljs-keyword">end</span>).value = bending.stressEnvelope.magnitude;
+  entries(<span class="hljs-keyword">end</span>).message = sprintf(<span class="hljs-string">&#x27;Max bending stress envelope %.3e Pa at element %d (%s)&#x27;</span>, ...
+    bending.stressEnvelope.magnitude, bending.stressEnvelope.elementID, bending.stressEnvelope.endLabel);
+
+  entries(<span class="hljs-keyword">end</span>+<span class="hljs-number">1</span>).key = <span class="hljs-string">&#x27;maxShearForce&#x27;</span>;
+  entries(<span class="hljs-keyword">end</span>).value = shear.force.magnitude;
+  entries(<span class="hljs-keyword">end</span>).message = sprintf(<span class="hljs-string">&#x27;Max shear force %.3e N at element %d (%s)&#x27;</span>, ...
+    shear.force.magnitude, shear.force.elementID, shear.force.endLabel);
+
+  entries(<span class="hljs-keyword">end</span>+<span class="hljs-number">1</span>).key = <span class="hljs-string">&#x27;maxShearStress&#x27;</span>;
+  entries(<span class="hljs-keyword">end</span>).value = shear.stress.magnitude;
+  entries(<span class="hljs-keyword">end</span>).message = sprintf(<span class="hljs-string">&#x27;Max shear stress %.3e Pa at element %d (%s)&#x27;</span>, ...
+    shear.stress.magnitude, shear.stress.elementID, shear.stress.endLabel);
+
+  entries(<span class="hljs-keyword">end</span>+<span class="hljs-number">1</span>).key = <span class="hljs-string">&#x27;maxVonMisesStress&#x27;</span>;
+  entries(<span class="hljs-keyword">end</span>).value = vm.value.magnitude;
+  entries(<span class="hljs-keyword">end</span>).message = sprintf(<span class="hljs-string">&#x27;Max von Mises stress %.3e Pa at element %d (%s)&#x27;</span>, ...
+    vm.value.magnitude, vm.elementID, vm.endLabel);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="412-srcreportingcomputebendingextremasummarym">4.12 <code>src/reporting/computeBendingExtremaSummary.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Identify the largest bending moment and stresses by plane (typically top/bottom fibres) and envelope.</li>
+<li><strong>Data Sources</strong>: reads <code>stresses.bending_details</code>, which stores plane/end matrices and precomputed absolute maxima.</li>
+<li><strong>Edge Cases</strong>: returns zeroed defaults when the stresses struct is empty, sustaining robust reporting for degenerate models.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">summary</span> = <span class="hljs-title">computeBendingExtremaSummary</span><span class="hljs-params">(stresses)</span></span>
+  summary = makeDefaultBendingSummary();
+  details = stresses.bending_details;
+
+  <span class="hljs-keyword">if</span> <span class="hljs-built_in">isempty</span>(details) || <span class="hljs-built_in">isempty</span>(details.moment.maxAbs)
+    <span class="hljs-keyword">return</span>;
+  <span class="hljs-keyword">end</span>
+
+  [summary.moment.magnitude, idxMoment] = <span class="hljs-built_in">max</span>(details.moment.maxAbs);
+  summary.moment.signedValue = details.moment.signed(idxMoment);
+  summary.moment.elementID = stresses.element_ids(idxMoment);
+  summary.moment.planeIdx = details.moment.planeIdx(idxMoment);
+  summary.moment.planeLabel = details.planeLabels(summary.moment.planeIdx);
+  summary.moment.endIdx = details.moment.endIdx(idxMoment);
+  summary.moment.endLabel = details.endLabels(summary.moment.endIdx);
+
+  <span class="hljs-keyword">for</span> planeIdx = <span class="hljs-number">1</span>:<span class="hljs-built_in">numel</span>(details.planeLabels)
+    [mag, idxPlane] = <span class="hljs-built_in">max</span>(details.stress.maxAbs(:, planeIdx));
+    summary.stressPlane(planeIdx).magnitude = mag;
+    summary.stressPlane(planeIdx).signedValue = details.stress.signed(idxPlane, planeIdx);
+    summary.stressPlane(planeIdx).elementID = stresses.element_ids(idxPlane);
+    summary.stressPlane(planeIdx).planeIdx = planeIdx;
+    summary.stressPlane(planeIdx).planeLabel = details.planeLabels(planeIdx);
+    summary.stressPlane(planeIdx).endIdx = details.stress.endIdx(idxPlane, planeIdx);
+    summary.stressPlane(planeIdx).endLabel = details.endLabels(summary.stressPlane(planeIdx).endIdx);
+  <span class="hljs-keyword">end</span>
+
+  [summary.stressEnvelope.magnitude, idxEnv] = <span class="hljs-built_in">max</span>(details.stressEnvelope.maxAbs(:));
+  summary.stressEnvelope.signedValue = details.stressEnvelope.signed(idxEnv);
+  summary.stressEnvelope.elementID = stresses.element_ids(details.stressEnvelope.elementIdx(idxEnv));
+  summary.stressEnvelope.planeIdx = details.stressEnvelope.planeIdx(idxEnv);
+  summary.stressEnvelope.planeLabel = details.planeLabels(summary.stressEnvelope.planeIdx);
+  summary.stressEnvelope.endIdx = details.stressEnvelope.endIdx(idxEnv);
+  summary.stressEnvelope.endLabel = details.endLabels(summary.stressEnvelope.endIdx);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="413-srcreportingcomputeshearextremasummarym">4.13 <code>src/reporting/computeShearExtremaSummary.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Extract controlling shear force and shear stress, preserving plane/end metadata (planes represent positive/negative faces for shear stress bookkeeping).</li>
+<li><strong>Notable Logic</strong>: clamps plane/end indices to valid ranges to protect against data corruption or coding errors upstream.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">summary</span> = <span class="hljs-title">computeShearExtremaSummary</span><span class="hljs-params">(stresses)</span></span>
+  summary = makeDefaultShearSummary();
+  details = stresses.shear_details;
+
+  <span class="hljs-keyword">if</span> <span class="hljs-built_in">isempty</span>(details) || <span class="hljs-built_in">isempty</span>(details.force.maxAbs)
+    <span class="hljs-keyword">return</span>;
+  <span class="hljs-keyword">end</span>
+
+  [summary.force.magnitude, idxForce] = <span class="hljs-built_in">max</span>(details.force.maxAbs);
+  summary.force.signedValue = details.force.signed(idxForce);
+  summary.force.elementID = stresses.element_ids(idxForce);
+  summary.force.endIdx = clampIndex(details.force.endIdx(idxForce), <span class="hljs-built_in">numel</span>(details.endLabels));
+  summary.force.endLabel = details.endLabels(summary.force.endIdx);
+
+  [summary.stress.magnitude, idxStress] = <span class="hljs-built_in">max</span>(details.stress.maxAbs);
+  summary.stress.signedValue = details.stress.signed(idxStress);
+  summary.stress.elementID = stresses.element_ids(idxStress);
+  summary.stress.endIdx = clampIndex(details.stress.endIdx(idxStress), <span class="hljs-built_in">numel</span>(details.endLabels));
+  summary.stress.endLabel = details.endLabels(summary.stress.endIdx);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<h3 id="414-srcreportingcomputevonmisesextremasummarym">4.14 <code>src/reporting/computeVonMisesExtremaSummary.m</code></h3>
+<ul>
+<li><strong>Responsibility</strong>: Determine the maximum von Mises stress and its location metadata.</li>
+<li><strong>Usage</strong>: feeds the console report and provides a quick check when comparing against allowable stresses in design workflows.</li>
+</ul>
+<p><strong>MATLAB-style pseudocode</strong></p>
+<pre><code class="language-matlab"><span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">summary</span> = <span class="hljs-title">computeVonMisesExtremaSummary</span><span class="hljs-params">(stresses)</span></span>
+  summary = makeDefaultVonMisesSummary();
+  details = stresses.von_mises_details;
+
+  <span class="hljs-keyword">if</span> <span class="hljs-built_in">isempty</span>(details) || <span class="hljs-built_in">isempty</span>(details.maxAbs)
+    <span class="hljs-keyword">return</span>;
+  <span class="hljs-keyword">end</span>
+
+  [summary.value.magnitude, idx] = <span class="hljs-built_in">max</span>(details.maxAbs);
+  summary.value.signedValue = details.signed(idx);
+  summary.elementID = stresses.element_ids(details.elementIdx(idx));
+  summary.planeIdx = clampIndex(details.planeIdx(idx), <span class="hljs-built_in">numel</span>(details.planeLabels));
+  summary.planeLabel = details.planeLabels(summary.planeIdx);
+  summary.endIdx = clampIndex(details.endIdx(idx), <span class="hljs-built_in">numel</span>(details.endLabels));
+  summary.endLabel = details.endLabels(summary.endIdx);
+<span class="hljs-keyword">end</span>
+</code></pre>
+<hr>
+<h2 id="5-algorithmic-notes">5. Algorithmic Notes</h2>
+<ul>
+<li><strong>Degree-of-Freedom Ordering</strong>: each node contributes <code>(ux, uy, theta)</code> to the global vector. Assembly functions map element DOFs using this ordering, so changes must propagate consistently.</li>
+<li><strong>Transformation Matrices</strong>: element matrices are constructed in local coordinates then rotated to global via 6×6 transformation matrices built from direction cosines <code>(c, s)</code>.</li>
+<li><strong>Shear Deformation</strong>: the correction factor <code>phi</code> modifies the bending portion of the stiffness matrix, distinguishing Timoshenko behaviour from Euler-Bernoulli. Setting <code>G</code> very large or <code>As → ∞</code> effectively recovers Euler-Bernoulli behaviour.</li>
+<li><strong>Self-Weight Loading</strong>: each element's distributed weight (<code>ρ · A · L · g</code>) is converted into equivalent nodal forces and moments using a consistent formulation. These are superimposed on user-specified nodal loads.</li>
+<li><strong>Von Mises Approximation</strong>: the combined stress metric uses <code>σ_vm = sqrt(σ_axial^2 + σ_bending^2 + 3 τ^2)</code>. This matches common beam design approximations where axial and bending stresses act along the same axis with shear through thickness.</li>
+</ul>
+<hr>
+<h2 id="6-diagnostics-and-error-handling">6. Diagnostics and Error Handling</h2>
+<ul>
+<li><strong>Workbook Errors</strong>: missing sheets or headers raise MATLAB errors with guidance describing expected sheet names and columns.</li>
+<li><strong>Constraint Warnings</strong>: <code>performTimoshenkoFEA</code> checks the condition number of <code>K_ff</code>. If the system is singular or poorly conditioned, a warning prompts users to review support definitions.</li>
+<li><strong>Geometry Sanity Checks</strong>: <code>calculateTimoshenkoStresses</code> warns when user-supplied geometry deviates from implied section modulus values beyond ±20%, preventing silent mistakes in section dimensions.</li>
+<li><strong>Plotting Safeguards</strong>: both plotting functions protect against empty datasets and handle zero displacement cases without throwing errors.</li>
+</ul>
+<hr>
+<h2 id="7-extending-the-toolkit">7. Extending the Toolkit</h2>
+<ol>
+<li><strong>New Section Types</strong>: add cases to <code>calculateTimoshenkoSectionProperties</code>. Provide formulas for <code>I</code>, <code>ky</code>, and <code>maxDistance</code>, then update workbook documentation so users can supply the required dimensions.</li>
+<li><strong>Element-Wise Properties</strong>: modify <code>readInputData</code> to ingest property columns per element, and update the solver to read the appropriate value inside element loops.</li>
+<li><strong>Distributed Loads</strong>: extend <code>performTimoshenkoFEA</code> with functions that translate line loads into equivalent nodal forces, similar to the existing self-weight logic.</li>
+<li><strong>Exporters</strong>: create utilities under <code>src/reporting/</code> to write CSV/Excel summaries. Reuse <code>prepareStressReportEntries</code> to avoid duplicating formatting rules.</li>
+<li><strong>Automation</strong>: embed the solver within optimisation or parametric studies by calling <code>performTimoshenkoFEA</code> directly inside your scripts. Disconnect plotting to run headless analyses when performance matters.</li>
+</ol>
+<hr>
+<h2 id="8-verification-strategy">8. Verification Strategy</h2>
+<ul>
+<li><strong>Analytical Benchmarks</strong>: start with classical cases (cantilever with tip load, simply supported beam with uniform load) and compare against published Timoshenko solutions for deflection and rotation.</li>
+<li><strong>Mesh Convergence</strong>: refine element counts and observe convergence of displacements and stresses to ensure the formulation behaves as expected.</li>
+<li><strong>Regression Scripts</strong>: capture benchmark load cases in simple MATLAB scripts (e.g., under a <code>tests/</code> folder) that assert tolerance-based comparisons. This guards against regressions when extending functionality.</li>
+<li><strong>Peer Review</strong>: document load cases, assumptions, and results in <code>docs/</code> to maintain traceability, especially when using the toolkit in coursework or research publications.</li>
+</ul>
+<hr>
+<h2 id="9-glossary">9. Glossary</h2>
+<ul>
+<li><strong>DOF</strong>: Degree of Freedom (<code>ux</code>, <code>uy</code>, <code>theta</code> per node).</li>
+<li><strong>Element Ends</strong>: In reporting, <code>End A</code> corresponds to the first node, <code>End B</code> to the second node of each element.</li>
+<li><strong>Planes</strong>: Top/bottom fibres used for bending stress evaluation; positive plane typically represents the positive local y-face.</li>
+<li><strong>Ky</strong>: Shear correction factor applied to cross-sectional area to account for non-uniform shear stress distribution.</li>
+<li><strong>Von Mises Stress</strong>: Scalar combination of normal and shear stresses used for yield checks.</li>
+</ul>
+<hr>
+<p>For additional context, refer back to <code>README.md</code> for high-level usage instructions or explore the source files directly to inspect implementation details.</p>
+
+            
+            
+        </body>
+        </html>
