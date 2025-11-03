@@ -6,6 +6,8 @@ This repository contains a modular MATLAB implementation of a two-dimensional Ti
 - End-to-end MATLAB pipeline from Excel input to publication-ready plots
 - Modular source tree that invites experimentation with material laws or elements
 - Built-in utilities for post-processing, visualization, and result inspection
+- Automatic self-weight loading using consistent nodal forces and end moments
+- Automated extreme-value stress reporting with element, plane, and end metadata
 - Verification guidance to compare with analytical Timoshenko beam solutions
 
 ## Table of Contents
@@ -88,7 +90,8 @@ Create an `input_data.xlsx` file under `data/`. Each sheet feeds a different par
 | 3 | 1000 | 0 | 150 |
 
 - Forces are applied at nodes in Newtons and follow the right-handed sign convention: positive `Fx` acts along +X (right), positive `Fy` acts along +Y (up), and positive `Mz` induces a counter-clockwise rotation about +Z (out of plane).
-- Forces are applied at nodes in Newtons and follow the right-handed sign convention: positive `Fx` acts along +X (right), positive `Fy` acts along +Y (up), and positive `Mz` induces a counter-clockwise rotation about +Z (out of plane). Include the `Mz` column even when the nodal moment is zero so the solver can assemble the global load vector consistently.
+- Include the `Mz` column even when the nodal moment is zero so the solver can assemble the global load vector consistently.
+- Self-weight loads are derived from `density` and applied automatically; set `density` to zero to suppress gravity loads when necessary.
 
 ### 5. `Properties`
 At minimum include:
@@ -127,11 +130,16 @@ Optional columns (recommended for high accuracy):
 - **Console log**
   - Beam summary (counts, material constants, derived section properties).
   - Max horizontal/vertical displacements and rotations with contextual notes.
+  - Extreme-value stress lines (bending moments, bending stresses, shear forces, shear stresses, von Mises) with the controlling element, section plane, and end.
   - Peak combined stress, bending moment, shear force, and shear stress per element.
 - **Plots**
   - Undeformed layout for quick verification of geometry, support types, and load directions.
   - Deformed shape using an automatic scale factor; legend indicates the magnification.
   - Colorbar reports actual displacement magnitudes (meters).
+- **Programmatic access**
+  - `stresses.elemental`, `stresses.bending_moments`, `stresses.shear_forces`, and `stresses.von_mises` provide ready-to-plot envelopes.
+  - Detailed structs (`stresses.bending_details`, `stresses.shear_details`, `stresses.von_mises_details`) capture the plane/end metadata driving the console report.
+  - The helper `prepareStressReportEntries` turns these details into consistent text output if you want to reformat or export the results.
 
 If you need numerical displacements or stresses for post-processing, capture the outputs directly by calling the lower-level API:
 ```matlab
@@ -139,6 +147,8 @@ workbookPath = fullfile('data', 'input_data.xlsx');
 [nodes, elements, supports, forces, E, A, rho, sectionType, w, h, d, G, nu] = readInputData(workbookPath);
 [displacements, stresses] = performTimoshenkoFEA(nodes, elements, supports, forces, E, A, rho, sectionType, w, h, d, G, nu);
 ```
+
+Key fields inside `stresses` mirror the console summary and expose deeper metadata for custom reporting or plotting.
 
 ---
 
@@ -148,6 +158,7 @@ workbookPath = fullfile('data', 'input_data.xlsx');
 - **Element refinement**: Add more nodes/elements to capture curvature or localized loads with greater fidelity.
 - **Cross-section library**: Extend `calculateTimoshenkoSectionProperties.m` with additional shapes (e.g., I-beams, hollow rectangles) and return the appropriate shear correction factors.
 - **Non-uniform properties**: The current implementation assumes constant material/section properties. To vary them per element, pass vectors of `E`, `A`, etc., and adapt the loops accordingly.
+- **Reporting format**: Customize `prepareStressReportEntries` or the `compute*ExtremaSummary` helpers to feed dashboards, Excel exports, or automated validators.
 
 ---
 
@@ -163,6 +174,7 @@ workbookPath = fullfile('data', 'input_data.xlsx');
 - **Ill-conditioned stiffness warning** – Typically indicates missing supports or an unconstrained degree of freedom. Double-check boundary conditions.
 - **Zero or tiny displacements** – Units may be inconsistent (e.g., millimeters instead of meters) or the load magnitudes are too small relative to stiffness.
 - **Plots missing forces/supports** – Verify the IDs in `Supports` and `Forces` correspond to valid node IDs.
+- **Section modulus warning** – The solver now checks geometric consistency and warns if the computed section modulus deviates by more than 20% from the expected value for rectangles, squares, or circles; revalidate the workbook dimensions and units if this appears.
 
 ---
 

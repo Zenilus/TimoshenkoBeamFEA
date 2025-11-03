@@ -43,8 +43,19 @@ function TimoshenkoBeamFEA(inputWorkbook)
 
     % STEP 6: Display stress analysis results
     % These are the internal forces and stresses that develop in the beam.
-    fprintf('\nMaximum element stress: %.6e Pa\n', max(abs(stresses.elemental)));
-    fprintf('Maximum bending moment: %.6e N·m\n', max(abs(stresses.bending_moments)));
-    fprintf('Maximum shear force: %.6e N\n', max(abs(stresses.shear_forces)));
-    fprintf('Maximum shear stress: %.6e Pa\n', max(abs(stresses.shear_stresses)));
+    stressEntries = prepareStressReportEntries(stresses);
+    reportOrder = {
+        'maxBendingMoment', ...
+        'maxBendingStressPlane1', ...
+        'maxBendingStressPlane2', ...
+        'maxBendingStressEnvelope', ...
+        'maxShearForce', ...
+        'maxShearStress', ...
+        'maxVonMisesStress'
+    };
+
+    for idx = 1:numel(reportOrder)
+        entry = stressEntries.(reportOrder{idx});
+        fprintf('%s\n', entry.text);
+    end
 end

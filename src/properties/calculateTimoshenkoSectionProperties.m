@@ -10,7 +10,9 @@ function [I, As, maxDistance, ky] = calculateTimoshenkoSectionProperties(section
     % maxDistance = Maximum distance from neutral axis (for stress calculation)
     % ky = Shear correction factor (accounts for non-uniform shear distribution)
     
-    switch lower(char(sectionType))
+    shape = lower(char(sectionType));
+
+    switch shape
         case 'rectangle'
             % RECTANGULAR CROSS-SECTION
             % Most common in construction (like wooden beams, concrete beams)
@@ -25,16 +27,24 @@ function [I, As, maxDistance, ky] = calculateTimoshenkoSectionProperties(section
         case 'square'
             % SQUARE CROSS-SECTION
             % Special case of rectangle where width = height
-            I = (width^4) / 12;        % Same formula as rectangle
-            maxDistance = width / 2;   % Distance to corner
+            side = width;
+            if side <= 0 && height > 0
+                side = height; % Fall back to provided height if width absent
+            end
+            I = (side^4) / 12;        % Same formula as rectangle with b=h=a
+            maxDistance = side / 2;   % Distance to extreme fiber
             ky = 5/6;                  % Same correction factor as rectangle
             As = ky * A;
             
         case 'circle'
             % CIRCULAR CROSS-SECTION
             % Common for pipes, rods, and some structural members
-            I = (pi * diameter^4) / 64;  % Moment of inertia for circle
-            maxDistance = diameter / 2;  % Maximum stress at outer fiber
+            if diameter <= 0 && width > 0
+                diameter = width; % Allow callers that accidentally pass diameter as width
+            end
+            radius = diameter / 2;
+            I = (pi * radius^4) / 4;  % Moment of inertia for circle (solid)
+            maxDistance = radius;      % Maximum stress at outer fiber
             
             % Circular sections have a different shear stress distribution
             % leading to a different correction factor

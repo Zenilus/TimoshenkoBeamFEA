@@ -10,7 +10,8 @@ This document explains the purpose, data flow, and implementation details of the
 - Raw model data is imported from an Excel workbook (`src/io/readInputData.m`).
 - Section properties specific to Timoshenko theory are derived in `src/properties/calculateTimoshenkoSectionProperties.m`.
 - Element stiffness, global assembly, and response calculations reside in `src/analysis`.
-- Reporting utilities in `src/reporting` and `src/visualization` present the results.
+- Reporting utilities in `src/reporting` format displacement summaries, compute stress extrema, and build reusable metadata structs while `src/visualization` presents the plots.
+- Stress summaries flow through `prepareStressReportEntries.m`, which delegates to `computeBendingExtremaSummary.m`, `computeShearExtremaSummary.m`, and `computeVonMisesExtremaSummary.m`.
 
 Data moves through the system in the following order:
 
@@ -25,6 +26,10 @@ Excel workbook
           -> calculateTimoshenkoStresses (postprocessing)
       -> displayResults (displacement summary)
       -> plotDeformedShape + getColorFromValue (post-analysis visualization)
+      -> prepareStressReportEntries
+          -> computeBendingExtremaSummary
+          -> computeShearExtremaSummary
+          -> computeVonMisesExtremaSummary
 ```
 
 ---
@@ -37,12 +42,13 @@ Excel workbook
 - `inputWorkbook` (string, optional): Path to the Excel workbook containing model data. Defaults to `data/input_data.xlsx` inside the project.
 
 **Outputs**
-- None (prints results and generates plots). Returns when analysis completes.
+- None (prints displacement and stress summaries, generates plots). Returns when analysis completes.
 
 **Key operations**
 - Ensures the `src` directory is on the MATLAB path.
 - Falls back to the packaged sample workbook when no argument is supplied.
 - Delegates to the solver and visualization utilities in sequence.
+- Feeds the stress metadata through `prepareStressReportEntries` for console reporting.
 
 **Pseudocode**
 
@@ -56,6 +62,10 @@ function TimoshenkoBeamFEA(inputWorkbook)
     [displacements, stresses] = performTimoshenkoFEA(nodes, elements, supports, forces, props...)
     displayResults(displacements)
     plotDeformedShape(nodes, elements, displacements)
+    stressEntries = prepareStressReportEntries(stresses)
+    for each entry in reporting order
+        fprintf entry to console
+    end
     print stress extrema (elemental, bending, shear)
 end
 ```
@@ -63,6 +73,7 @@ end
 **Notable considerations**
 - Designed as a function, so it can be invoked from MATLAB scripts or the command window.
 - Adds the entire `src` tree to the path to support modular development.
+- The reporting pipeline separates data extraction from formatting, making it easier to export the stress maxima elsewhere.
 
 ---
 
@@ -200,7 +211,10 @@ end
 
 **Outputs**
 - `displacements` (`3n×1` vector): Nodal displacements ordered `[u1, v1, theta1, u2, ...]`.
-- `stresses` (struct): Fields `elemental`, `bending_moments`, `shear_forces`, `shear_stresses`, `element_positions`.
+- `stresses` (struct):
+    - `elemental`, `bending_moments`, `shear_forces`, `shear_stresses`, `element_positions`, `von_mises`.
+    - `bending_details`, `shear_details`, `von_mises_details` carry plane/end metadata for reporting.
+    - `bending_stresses` retains per-plane extreme-fiber stresses.
 
 **Pseudocode**
 
@@ -230,7 +244,8 @@ function [displacements, stresses] = performTimoshenkoFEA(nodes, elements, suppo
 
     for each element
         compute self-weight = density * A * L * g
-        distribute half the weight to each node's vertical DOF in F
+        build consistent nodal load (axial, shear, end moments) in local axes
+        rotate to global coordinates and add to F
     end
 
     identify constrained DOFs from supports (fixed, pinned, roller)
@@ -240,17 +255,19 @@ function [displacements, stresses] = performTimoshenkoFEA(nodes, elements, suppo
     if rcond(Kff) very small -> warn about ill-conditioning
     solve displacements on free DOF: displacements(free_dof) = Kff \ Ff
 
-    [elemental_stresses, bending_moments, shear_forces, shear_stresses, element_positions] =
-        calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As, I, maxDistance)
+    [elemental_stresses, bending_moments, shear_forces, shear_stresses, element_positions, bending_stress_planes,
+     bending_details, shear_details, von_mises_details] =
+        calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As, I, maxDistance, sectionType, width, height, diameter, density)
 
-    pack stress results into struct and return
+    pack stress results (including metadata structs) into stresses and return
 end
 ```
 
 **Notable considerations**
 - Assumes 2D planar frame elements with DOF order `[u, v, theta]` at each node.
-- Self-weight is included as a uniformly distributed load converted to equivalent nodal forces.
+- Self-weight is included as a uniformly distributed load converted to equivalent nodal forces and end moments; set `density = 0` to disable.
 - Supports can be mixed; the logic simply appends constrained DOFs before solving.
+- Detailed stress metadata is preserved so downstream reporting can identify the controlling element, section plane, and element end for every extreme value.
 
 ---
 
@@ -261,19 +278,24 @@ end
 **Inputs**
 - `nodes`, `elements`, `displacements`: Structural definition and solved displacements.
 - Material/section data: `E`, `G`, `A`, `As`, `I`, `maxDistance`.
+- Section metadata for sanity checks: `sectionType`, `width`, `height`, `diameter`.
 
 **Outputs**
 - `elemental_stresses`: Scalar von-Mises-like stress per element.
-- `bending_moments`: Internal bending moments.
+- `bending_moments`: Max absolute bending moment across element ends and planes.
+- `bending_stresses`: Extreme-fiber bending stress envelope by plane (top/bottom).
 - `shear_forces`: Internal shear forces.
 - `shear_stresses`: Shear stress per element (`V / As`).
 - `element_positions`: Midpoint x-coordinates (for plotting or reporting).
+- `bending_details`, `shear_details`, `von_mises_details`: Metadata structs capturing the controlling plane/end indices, signed values, and per-plane/per-end matrices used by the reporting utilities.
+- `von_mises`: Max absolute von Mises value per element for quick plotting.
 
 **Pseudocode**
 
 ```text
-function calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As, I, maxDistance)
+function calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As, I, maxDistance, sectionType, width, height, diameter)
     initialize result vectors sized to number of elements
+    compute section modulus and warn if inconsistent with geometry inputs (rectangles, squares, circles)
     for each element
         locate node rows for its end nodes
         extract local DOF displacements (u, v, theta at each node)
@@ -281,28 +303,37 @@ function calculateTimoshenkoStresses(nodes, elements, displacements, E, G, A, As
         build transformation matrix T and form local displacement vector d_local = T * [d1; d2]
 
         axial_strain = (d_local(4) - d_local(1)) / L
-        curvature = (d_local(6) - d_local(3)) / L
         theta_avg = (d_local(3) + d_local(6)) / 2
         shear_strain = (d_local(5) - d_local(2)) / L - theta_avg
 
         axial_force = E * A * axial_strain
-        bending_moment = E * I * curvature
+        section_modulus = I / maxDistance
         shear_force = G * As * shear_strain
+        recover local nodal force vector f_local = k_local * d_local
+        build equivalent nodal loads for self-weight using density, subtract them from f_local
+        moment_endA = f_local(3); moment_endB = f_local(6)
+        store full plane/end matrices for bending moments and stresses
+        bending_moment_envelope = max(abs([moment_endA, moment_endB; -moment_endA, -moment_endB]))
 
         axial_stress = axial_force / A
-        bending_stress = bending_moment * maxDistance / I
+        bending_stresses_plane = [-moment_endA, -moment_endB; moment_endA, moment_endB] / section_modulus
+        bending_stress_envelope = max(abs(bending_stresses_plane(:)))
         shear_stress = shear_force / As
 
-        elemental_stress = sqrt(axial_stress^2 + bending_stress^2 + 3 * shear_stress^2)
-        store outputs and element midpoint position
+        elemental_stress = sqrt(axial_stress^2 + bending_stress_envelope^2 + 3 * shear_stress^2)
+        compute von Mises per plane/end and track controlling plane/end indices for bending, shear, and von Mises responses
+        store outputs, element midpoint position, and metadata indices
     end
-    return all result vectors
+    assemble `bending_details`, `shear_details`, `von_mises_details` structs from the stored metadata and return everything
 end
 ```
 
 **Notable considerations**
 - Uses a von-Mises-style combination of axial, bending, and shear stresses to produce a single comparison metric.
 - Transformation matrix matches the one used during stiffness assembly to ensure consistent local coordinates.
+- Subtracts the equivalent nodal forces from self-weight before reporting internal forces and moments so the extrema reflect applied loads.
+- Geometry sanity checks warn when the workbook dimensions do not match the implied section modulus within ±20% for supported shapes.
+- Metadata structs allow downstream reporting to cite the controlling element, plane, and end without recomputing extrema.
 
 ---
 
@@ -449,6 +480,130 @@ end
 **Notable considerations**
 - Gracefully handles the degenerate case where the entire model has zero displacement.
 - Uses 256 bins to match MATLAB's default size for the `jet` colormap and ensure smooth gradients.
+
+---
+
+## src/reporting/prepareStressReportEntries.m
+
+**Role**: Convert the rich `stresses` metadata into formatted console strings and reusable entry structs.
+
+**Inputs**
+- `stresses` (struct): Output of `performTimoshenkoFEA` containing extrema vectors and metadata.
+
+**Outputs**
+- `entries` (struct): Fields such as `maxBendingMoment`, `maxShearStress`, `maxVonMisesStress`; each field supplies human-readable text plus numeric metadata.
+
+**Pseudocode**
+
+```text
+function entries = prepareStressReportEntries(stresses)
+    bending_summary = computeBendingExtremaSummary(stresses)
+    shear_summary = computeShearExtremaSummary(stresses)
+    von_mises_summary = computeVonMisesExtremaSummary(stresses)
+    entries = struct()
+    entries.maxBendingMoment = buildEntry(bending_summary.moment, 'N·m')
+    entries.maxBendingStressPlane1 = buildEntry(bending_summary.stressPlane(1), 'Pa')
+    ... repeat for plane 2 and envelope ...
+    entries.maxShearForce = buildEntry(shear_summary.force, 'N')
+    entries.maxShearStress = buildEntry(shear_summary.stress, 'Pa')
+    entries.maxVonMisesStress = buildEntry(von_mises_summary, 'Pa')
+end
+```
+
+**Notable considerations**
+- Centralizes label formatting so console output and future exporters stay consistent.
+- Clamps invalid plane/end indices to safe defaults and normalizes numeric values to absolute magnitudes for reporting.
+
+---
+
+## src/reporting/computeBendingExtremaSummary.m
+
+**Role**: Extract controlling bending moments and stresses from `stresses.bending_details` with element, plane, and end metadata.
+
+**Inputs**
+- `stresses` (struct): Must include `element_ids` and `bending_details` returned by the solver.
+
+**Outputs**
+- `summary` (struct): Contains `moment`, `stressPlane` (array of plane-specific records), and `stressEnvelope`, each with magnitude, signed value, controlling element, plane index, and end index.
+
+**Pseudocode**
+
+```text
+function summary = computeBendingExtremaSummary(stresses)
+    validate stresses.bending_details exists
+    summary = defaults for moment and stresses
+    if no elements -> return
+    locate element with max bending moment magnitude via details.moment.maxAbs
+    record plane/end indices using clampIndex helper
+    for each plane
+        find max bending stress magnitude and record metadata
+    end
+    find global bending stress envelope across planes/ends
+    ensure fallback metadata if element IDs missing
+end
+```
+
+**Notable considerations**
+- Supplies both plane-specific and envelope results so callers can report per-fiber maxima as well as the global extreme.
+- Tolerant of empty models; returns zero-filled defaults rather than erroring.
+
+---
+
+## src/reporting/computeShearExtremaSummary.m
+
+**Role**: Identify the controlling shear force and shear stress, preserving plane/end locations.
+
+**Inputs**
+- `stresses` (struct): Expects `shear_details` with per-plane/per-end arrays and `element_ids`.
+
+**Outputs**
+- `summary` (struct): Fields `force` and `stress`, each carrying absolute and signed values plus location metadata.
+
+**Pseudocode**
+
+```text
+function summary = computeShearExtremaSummary(stresses)
+    initialize force/stress entries to defaults
+    if shear_details missing or empty -> return defaults
+    locate element index with maximum |shear|
+    clamp plane/end indices
+    pull signed force and stress from planeEnd matrices
+    populate summary struct with metadata labels
+end
+```
+
+**Notable considerations**
+- Returns graceful defaults when shear metadata is absent (e.g., no elements) so reporting stays robust.
+- Mirrors the plane/end naming used for bending summaries to simplify downstream formatting.
+
+---
+
+## src/reporting/computeVonMisesExtremaSummary.m
+
+**Role**: Provide the maximum von Mises stress and its location metadata for reporting or threshold checks.
+
+**Inputs**
+- `stresses` (struct): Requires `von_mises_details` containing per-plane/per-end values and `element_ids`.
+
+**Outputs**
+- `summary` (struct): Fields `value`, `elementID`, `planeIdx`, `planeLabel`, `endIdx`, `endLabel`.
+
+**Pseudocode**
+
+```text
+function summary = computeVonMisesExtremaSummary(stresses)
+    summary = default entry
+    if von_mises_details missing or empty -> return
+    locate index of maxAbs value
+    clamp plane/end indices
+    look up signed von Mises value from planeEndValues
+    populate summary struct and return
+end
+```
+
+**Notable considerations**
+- Keeps the signed von Mises value so callers can detect tension/compression dominated responses while still reporting magnitudes.
+- Shares the same clamping helper logic as the bending/shear summaries for reliability.
 
 ---
 

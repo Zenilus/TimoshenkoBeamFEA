@@ -162,12 +162,12 @@ function [nodes, elements, supports, forces, E, A, density, sectionType, width, 
         
         % DISPLAY SUMMARY OF LOADED DATA
         % Let the user know what we successfully loaded
-        fprintf('Beam Data loaded successfully:\n');
-        fprintf('Nodes: %d\n', size(nodes, 1));
-        fprintf('Elements: %d\n', size(elements, 1));
-        fprintf('Supports: %d\n', length(supports.NodeID));
-        fprintf('Forces: %d\n', size(forces, 1));
-        fprintf('Moments: %d\n', num_moments);
+        fprintf('Beam Data loaded successfully!\n');
+        %fprintf('Nodes: %d\n', size(nodes, 1));
+        %fprintf('Elements: %d\n', size(elements, 1));
+        %fprintf('Supports: %d\n', length(supports.NodeID));
+        %fprintf('Forces: %d\n', size(forces, 1));
+        %fprintf('Moments: %d\n', num_moments);
         
     catch ME
         fprintf('Error reading input file: %s\n', ME.message);
